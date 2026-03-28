@@ -1,0 +1,49 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply scroll-smooth antialiased;
+    letter-spacing: 0.01em;
+  }
+  body {
+    @apply bg-surface text-ink font-sans min-h-screen;
+  }
+}
+
+@layer utilities {
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Kitap şeridi: sürekli yatay kayma (Storytel tarzı); üzerine gelince durur */
+@keyframes marquee-books {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(-50%);
+  }
+}
+
+.book-marquee-track {
+  animation: marquee-books var(--marquee-sec, 42s) linear infinite;
+  will-change: transform;
+}
+
+.book-marquee-track:hover {
+  animation-play-state: paused;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .book-marquee-track {
+    animation: none;
+    transform: none;
+  }
+}
