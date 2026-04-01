@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import HorizontalBookRow from "../components/HorizontalBookRow";
 import SmartBookCover from "../components/SmartBookCover";
-import { getLocalBookById as getBookById } from "../services/dbBooks";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import { fetchLocalBooks, getLocalBookById as getBookById } from "../services/dbBooks";
 import { getStockForBook, simulateBorrow } from "../data/mockAdmin";
 
 export default function BookDetail() {
@@ -9,6 +12,9 @@ export default function BookDetail() {
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [expandedDescription, setExpandedDescription] = useState(false);
+  const [similarBooks, setSimilarBooks] = useState([]);
   const [, setStockRev] = useState(0);
   const stock = getStockForBook(id);
 
@@ -35,13 +41,45 @@ export default function BookDetail() {
     const ok = simulateBorrow(id);
     if (ok) {
       setStockRev((n) => n + 1);
-      alert(
-        "Ödünç işlemi kaydedildi (demo). Backend bağlandığında kalıcı olacak.",
+      setNotice(
+        "Odunc islemi kaydedildi (demo). Backend baglandiginda kalici olacak.",
       );
     } else {
-      alert("Stokta uygun kopya yok.");
+      setNotice("Stokta uygun kopya yok.");
     }
   }
+
+  useEffect(() => {
+    if (!book) return;
+    let cancelled = false;
+    const mainAuthor = (book.authors?.[0] || "").toLowerCase();
+    const categories = (book.volumeInfo?.categories || []).map((c) => c.toLowerCase());
+
+    fetchLocalBooks(120)
+      .then((items) => {
+        if (cancelled) return;
+        const related = items
+          .filter((candidate) => candidate.id !== book.id)
+          .filter((candidate) => {
+            const candidateCats = (
+              candidate.volumeInfo?.categories || []
+            ).map((c) => c.toLowerCase());
+            const candidateAuthor = (candidate.authors?.[0] || "").toLowerCase();
+            const categoryMatch = candidateCats.some((cat) => categories.includes(cat));
+            const authorMatch = Boolean(mainAuthor && candidateAuthor.includes(mainAuthor));
+            return categoryMatch || authorMatch;
+          })
+          .slice(0, 12);
+        setSimilarBooks(related);
+      })
+      .catch(() => {
+        if (!cancelled) setSimilarBooks([]);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [book]);
 
   if (loading) {
     return (
@@ -68,6 +106,10 @@ export default function BookDetail() {
   }
 
   const authorLine = book.authors?.join(", ") || "Bilinmeyen yazar";
+  const hasCover = Boolean(book.thumbnail);
+  const desc = book.description || "Bu kitap için özet bilgisi bulunmuyor.";
+  const shouldTrim = desc.length > 900;
+  const shownDesc = !shouldTrim || expandedDescription ? desc : `${desc.slice(0, 900)}...`;
 
   return (
     <div className="mx-auto max-w-4xl px-4 py-10 md:px-6 md:py-14">
@@ -78,17 +120,23 @@ export default function BookDetail() {
         ← Katalog
       </Link>
 
-      <article className="overflow-hidden rounded-card bg-white shadow-card md:flex">
+      {!hasCover && (
+        <p className="mb-6 rounded-lg border border-ink/10 bg-surface px-4 py-3 text-sm text-ink/55">
+          Bu kayıt için veritabanında kapak URL’si tanımlı değil; listede başlık ile
+          gösterilir.
+        </p>
+      )}
+
+      <Card as="article" className="overflow-hidden md:flex">
         <div className="flex justify-center bg-gradient-to-br from-surface to-ink/[0.04] p-8 md:w-[320px] md:shrink-0">
-          <div className="w-full max-w-[260px]">
+          <div className="flex w-full max-w-[260px] min-h-[200px] items-stretch">
             <SmartBookCover
               src={book.thumbnail}
-              isbnDigits={book.isbnDigits}
+              fallbackSrc={book.coverFallbackUrl}
               title={book.title}
-              authorLine={authorLine}
-              className="min-h-[280px] w-full overflow-hidden rounded-lg shadow-card md:min-h-[360px]"
+              variant="detail"
+              alt={`${book.title} kitap kapagi`}
               imageClassName="max-h-[420px] w-full rounded-lg object-contain shadow-card"
-              placeholderClassName="min-h-[280px] md:min-h-[360px]"
             />
           </div>
         </div>
@@ -97,17 +145,18 @@ export default function BookDetail() {
             {book.title}
           </h1>
           <p className="mt-2 text-lg text-ink/65">{authorLine}</p>
-          {book.publishedDate && (
-            <p className="mt-1 text-sm text-ink/45">
-              Yayın: {book.publishedDate}
-            </p>
-          )}
-          {book.pageCount != null && (
-            <p className="mt-4 text-sm font-medium text-ink">
-              Sayfa sayısı:{" "}
-              <span className="text-ink/70">{book.pageCount}</span>
-            </p>
-          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            {book.publishedDate && (
+              <span className="rounded-full bg-ink/5 px-3 py-1 text-xs text-ink/65">
+                Yayin: {book.publishedDate}
+              </span>
+            )}
+            {book.pageCount != null && (
+              <span className="rounded-full bg-ink/5 px-3 py-1 text-xs text-ink/65">
+                Sayfa: {book.pageCount}
+              </span>
+            )}
+          </div>
 
           <div className="mt-6 flex flex-wrap items-center gap-3">
             <span
@@ -126,30 +175,51 @@ export default function BookDetail() {
             )}
           </div>
 
-          <p className="mt-6 flex-1 text-sm leading-relaxed text-ink/75 md:text-base">
-            {book.description
-              ? book.description.length > 900
-                ? `${book.description.slice(0, 900)}…`
-                : book.description
-              : "Bu kitap için özet bilgisi bulunmuyor."}
+          <p className="mt-6 text-sm leading-relaxed text-ink/75 md:text-base">
+            {shownDesc}
           </p>
+          {shouldTrim && (
+            <Button
+              variant="ghost"
+              className="mt-2 w-fit px-0 text-sm"
+              onClick={() => setExpandedDescription((v) => !v)}
+            >
+              {expandedDescription ? "Daha az goster" : "Devamini oku"}
+            </Button>
+          )}
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <button
-              type="button"
+            <Button
               disabled={!stock.inStock}
               onClick={handleBorrow}
-              className="rounded-lg bg-accent px-6 py-3 font-semibold text-white transition hover:bg-accentDark disabled:cursor-not-allowed disabled:opacity-45"
+              size="lg"
             >
-              Ödünç al
-            </button>
+              Odunc al
+            </Button>
           </div>
+          {notice && (
+            <p className="mt-3 rounded-lg border border-ink/10 bg-surface px-3 py-2 text-sm text-ink/70">
+              {notice}
+            </p>
+          )}
           <p className="mt-3 text-xs text-ink/40">
             Stok bilgisi şu an örnek veridir; veritabanı entegrasyonu sonrası
             gerçek zamanlı olacaktır.
           </p>
         </div>
-      </article>
+      </Card>
+      {similarBooks.length > 0 && (
+        <div className="mt-10">
+          <HorizontalBookRow
+            title="Benzer kitaplar"
+            subtitle="Ayni yazar veya benzer kategorilerden secildi."
+            books={similarBooks}
+            loading={false}
+            error=""
+            variant="scroll"
+          />
+        </div>
+      )}
     </div>
   );
 }

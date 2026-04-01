@@ -1,127 +1,91 @@
 import { useCallback, useEffect, useState } from "react";
-import { apiUrl } from "../services/dbBooks";
 
 /**
- * 1) Veritabanı kapak URL’si (src) varsa önce o
- * 2) Yoksa veya yüklenemezse → /api/kapak (Google Books, ISBN)
- * 3) Son çare: başlık/yazar yer tutucusu
+ * Kapak: önce src; http→https ve isteğe bağlı fallbackSrc (ör. kırık DB URL sonrası Open Library).
+ * İkisi de yüklenemezse başlık yer tutucusu.
+ * variant="hero": koyu şerit (ana sayfa şeridi).
+ * variant="detail": detay sayfası yer tutucusu (daha yüksek).
  */
 export default function SmartBookCover({
   src,
-  isbnDigits = "",
-  title,
-  authorLine = "",
-  className = "",
+  /** Birincil adres (ör. veritabanı) kırılırsa denenecek; genelde Open Library */
+  fallbackSrc,
+  title = "",
+  alt,
+  decorative = false,
   imageClassName = "",
-  placeholderClassName = "",
+  variant = "card",
 }) {
-  const digits = String(isbnDigits || "").replace(/\D/g, "");
-  const canGoogle = digits.length >= 10;
-
-  const [displaySrc, setDisplaySrc] = useState(() => src || null);
-  const [status, setStatus] = useState(() => {
-    if (src) return "primary";
-    if (canGoogle) return "loading";
-    return "empty";
-  });
-
-  const tryBackendCover = useCallback(() => {
-    if (!canGoogle) {
-      setDisplaySrc(null);
-      setStatus("empty");
-      return;
-    }
-    setStatus("loading");
-    const params = new URLSearchParams();
-    params.set("isbn", digits);
-    const tit = (title || "").trim();
-    if (tit.length >= 2) params.set("baslik", tit);
-    const auth = (authorLine || "").trim();
-    if (auth.length >= 2 && !/^bilinmeyen\s+yazar$/i.test(auth)) {
-      params.set("yazar", auth);
-    }
-    fetch(apiUrl(`/api/kapak/lookup?${params.toString()}`))
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.url) {
-          setDisplaySrc(d.url);
-          setStatus("google");
-        } else {
-          setDisplaySrc(null);
-          setStatus("empty");
-        }
-      })
-      .catch(() => {
-        setDisplaySrc(null);
-        setStatus("empty");
-      });
-  }, [canGoogle, digits]);
+  const initial =
+    src != null && String(src).trim() !== "" ? String(src).trim() : null;
+  const [displaySrc, setDisplaySrc] = useState(initial);
+  const [triedHttpsUpgrade, setTriedHttpsUpgrade] = useState(false);
+  const [triedFallback, setTriedFallback] = useState(false);
 
   useEffect(() => {
-    if (src) {
-      setDisplaySrc(src);
-      setStatus("primary");
-      return;
-    }
-    tryBackendCover();
-  }, [src, tryBackendCover]);
+    const next =
+      src != null && String(src).trim() !== "" ? String(src).trim() : null;
+    setDisplaySrc(next);
+    setTriedHttpsUpgrade(false);
+    setTriedFallback(false);
+  }, [src, fallbackSrc]);
 
   const onImgError = useCallback(() => {
-    if (status === "primary" && src && displaySrc === src) {
-      setDisplaySrc(null);
-      tryBackendCover();
+    if (displaySrc?.startsWith("http://") && !triedHttpsUpgrade) {
+      setTriedHttpsUpgrade(true);
+      setDisplaySrc(displaySrc.replace(/^http:\/\//i, "https://"));
       return;
     }
-    if (status === "google") {
-      setDisplaySrc(null);
-      setStatus("empty");
+    const fb =
+      fallbackSrc != null && String(fallbackSrc).trim() !== ""
+        ? String(fallbackSrc).trim()
+        : "";
+    if (fb && !triedFallback && fb !== displaySrc) {
+      setTriedFallback(true);
+      setTriedHttpsUpgrade(false);
+      setDisplaySrc(fb);
+      return;
     }
-  }, [status, src, displaySrc, tryBackendCover]);
+    setDisplaySrc(null);
+  }, [displaySrc, triedHttpsUpgrade, triedFallback, fallbackSrc]);
 
-  const onImgLoad = useCallback(
-    (e) => {
-      const w = e.currentTarget.naturalWidth;
-      if (w > 0 && w < 48) onImgError();
-    },
-    [onImgError],
-  );
-
-  if (status === "loading" && !displaySrc) {
-    return (
-      <div
-        className={`flex h-full w-full animate-pulse bg-gradient-to-br from-night/30 to-night/10 ${className}`}
-        aria-hidden
-      />
-    );
-  }
-
-  if (!displaySrc || status === "empty") {
-    return (
-      <div
-        className={`flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-night via-night/90 to-accent/35 p-3 text-center ${placeholderClassName} ${className}`}
-      >
-        <span className="line-clamp-4 text-[11px] font-semibold leading-snug text-white/95 md:text-xs">
-          {title || "Kitap"}
-        </span>
-        {authorLine ? (
-          <span className="mt-2 line-clamp-2 text-[10px] text-white/75">
-            {authorLine}
+  if (!displaySrc) {
+    const label = title?.trim() || "Kapak yok";
+    if (variant === "hero") {
+      return (
+        <div className="flex h-full w-full items-center justify-center bg-night/45 p-1.5 text-center text-[9px] font-medium leading-tight text-white/90 md:text-[10px]">
+          <span className="line-clamp-4">{label}</span>
+        </div>
+      );
+    }
+    if (variant === "detail") {
+      return (
+        <div className="flex min-h-[280px] w-full flex-col items-center justify-center rounded-lg border border-ink/10 bg-surface p-8 text-center md:min-h-[360px]">
+          <span className="max-w-xs text-sm leading-relaxed text-ink/45">
+            {label}
           </span>
-        ) : null}
+        </div>
+      );
+    }
+    return (
+      <div className="flex h-full w-full flex-col items-center justify-center bg-gradient-to-br from-night/[0.07] to-night/[0.12] p-3 text-center">
+        <span className="line-clamp-4 text-xs font-medium text-ink/45">
+          {label}
+        </span>
       </div>
     );
   }
 
   return (
     <img
-      key={displaySrc}
+      key={`${displaySrc}-${triedHttpsUpgrade}-${triedFallback}`}
       src={displaySrc}
-      alt=""
+      alt={decorative ? "" : alt || `${title || "Kitap"} kapak görseli`}
+      aria-hidden={decorative ? true : undefined}
       className={imageClassName}
       loading="lazy"
       referrerPolicy="no-referrer"
       onError={onImgError}
-      onLoad={onImgLoad}
     />
   );
 }

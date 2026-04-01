@@ -4,268 +4,84 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const express = require("express");
 const { Pool } = require("pg");
 const cors = require("cors");
+const { isSafeRemoteImageUrl } = require("./scripts/coverProxyUtils");
+const { sniffImageMime } = require("./scripts/sniffImageMime");
 
 const app = express();
 app.use(cors());
 app.use(express.json());
 
-const pool = new Pool({
-  user: process.env.PGUSER || "postgres",
-  password: process.env.PGPASSWORD || "123456",
-  host: process.env.PGHOST || "localhost",
-  port: Number(process.env.PGPORT) || 5432,
-  database: process.env.PGDATABASE || "KutuphaneOtomasyon",
-});
-
-/** Kapak araması önbelleği (ISBN + başlık + yazar birleşik anahtar). */
-const coverCache = new Map();
-
-function pickCoverFromVolumeInfo(volumeInfo) {
-  const links = volumeInfo?.imageLinks;
-  const pick =
-    links?.extraLarge ||
-    links?.large ||
-    links?.medium ||
-    links?.thumbnail ||
-    links?.smallThumbnail ||
-    null;
-  return pick ? String(pick).replace(/^http:\/\//i, "https://") : null;
-}
-
-function normalizeTr(s) {
-  return String(s || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{M}/gu, "")
-    .replace(/ı/g, "i")
-    .replace(/ğ/g, "g")
-    .replace(/ü/g, "u")
-    .replace(/ş/g, "s")
-    .replace(/ö/g, "o")
-    .replace(/ç/g, "c")
-    .replace(/[^a-z0-9\s]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-/** Yanlış kitabın kapağını vermemek için başlık/yazar skoru. */
-function pickBestGoogleItem(items, wantTitle, wantAuthor) {
-  if (!items?.length) return null;
-  const wt = normalizeTr(wantTitle);
-  const wa = normalizeTr(wantAuthor);
-  const titleTok = wt.split(/\s+/).filter((x) => x.length >= 3);
-  const authorTok = wa.split(/\s+/).filter((x) => x.length >= 2);
-  const needAuthorOk = authorTok.length > 0;
-
-  const rows = [];
-  for (const it of items) {
-    const vol = it.volumeInfo;
-    if (!vol) continue;
-    const cover = pickCoverFromVolumeInfo(vol);
-    if (!cover) continue;
-    const t = normalizeTr(vol.title);
-    const authBlob = normalizeTr((vol.authors || []).join(" "));
-    let score = 0;
-    if (wt.length >= 4 && t.includes(wt)) score += 100;
-    if (wt.length >= 4 && wt.includes(t) && t.length >= 5) score += 70;
-    for (const w of titleTok) {
-      if (w.length >= 3 && t.includes(w)) score += 14;
-    }
-    const authorOk =
-      !needAuthorOk || authorTok.some((p) => p.length >= 2 && authBlob.includes(p));
-    if (needAuthorOk && !authorOk) score -= 80;
-    for (const p of authorTok) {
-      if (p.length >= 2 && authBlob.includes(p)) score += 28;
-    }
-    rows.push({ score, cover });
-  }
-  if (!rows.length) return null;
-  rows.sort((a, b) => b.score - a.score);
-  if (rows[0].score < 12) return null;
-  return rows[0].cover;
-}
-
-async function openLibrarySearchCover(title, author) {
-  const t = String(title || "").trim();
-  if (t.length < 2) return null;
-  const q = [t, String(author || "").trim()].filter((x) => x.length >= 1).join(" ");
-  try {
-    const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(q)}&limit=20`;
-    const res = await fetch(url);
-    if (!res.ok) return null;
-    const data = await res.json();
-    const docs = data.docs || [];
-    const wt = normalizeTr(t);
-    const authorTok = normalizeTr(author)
-      .split(/\s+/)
-      .filter((x) => x.length >= 2);
-    for (const doc of docs) {
-      const dt = normalizeTr(doc.title || "");
-      const da = normalizeTr((doc.author_name || []).join(" "));
-      const titleHit =
-        (wt.length >= 4 && dt.includes(wt)) ||
-        (wt.length >= 4 && wt.includes(dt) && dt.length >= 4) ||
-        wt
-          .split(/\s+/)
-          .filter((w) => w.length >= 3)
-          .some((w) => dt.includes(w));
-      if (!titleHit) continue;
-      if (authorTok.length && !authorTok.some((p) => da.includes(p))) continue;
-      if (doc.cover_i) {
-        return `https://covers.openlibrary.org/b/id/${doc.cover_i}-L.jpg`;
-      }
-    }
-  } catch (e) {
-    console.error("[kapak] Open Library:", e.message);
-  }
-  return null;
-}
-
-async function fetchGoogleVolumes(searchUrl) {
-  const res = await fetch(searchUrl);
-  const raw = await res.text();
-  let data;
-  try {
-    data = raw ? JSON.parse(raw) : {};
-  } catch {
-    console.error("[kapak] Google yanıtı JSON değil:", raw.slice(0, 120));
-    return { ok: false, data: {} };
-  }
-  if (!res.ok) {
-    console.error("[kapak] Google HTTP", res.status, data.error || raw.slice(0, 200));
-    return { ok: false, data };
-  }
-  if (data.error) {
-    console.error("[kapak] Google API:", data.error.message || JSON.stringify(data.error));
-    return { ok: false, data };
-  }
-  return { ok: true, data };
-}
+/** Yerel kapak dosyaları: indirme script'i buraya yazar; tarayıcı /covers/... ile okur */
+app.use(
+  "/covers",
+  express.static(path.join(__dirname, "public", "covers"), { maxAge: "7d" }),
+);
 
 /**
- * Google ISBN’de çoğu yerli kitap yok → başlık/yazar + skor + Open Library yedeği.
+ * Uzak görseli sunucudan çekip tarayıcıya iletir (Referer / bazı hotlink engellerini aşar).
+ * Örnek: /api/cover-proxy?url=https%3A%2F%2Fexample.com%2Fa.jpg
+ * Frontend: VITE_COVER_USE_PROXY=true
  */
-async function resolveCoverFromGoogle({ isbnDigits, title, author }) {
-  const key = process.env.GOOGLE_BOOKS_API_KEY?.trim();
-  if (!key) return { url: null, needsApiKey: true };
-
-  const t = String(title || "").trim();
-  const a = String(author || "").trim();
-  const cacheKey = `${String(isbnDigits || "").replace(/\D/g, "")}|${t}|${a}`;
-  if (coverCache.has(cacheKey)) {
-    return { url: coverCache.get(cacheKey), needsApiKey: false };
+app.get("/api/cover-proxy", async (req, res) => {
+  const raw = req.query.url;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return res.status(400).type("text/plain").send("url parametresi gerekli");
   }
-
-  const base = "https://www.googleapis.com/books/v1/volumes";
-  const keyQ = `&key=${encodeURIComponent(key)}`;
-  const tr = "&langRestrict=tr";
-
-  const googleTry = async (qParam, max) => {
-    const { ok, data } = await fetchGoogleVolumes(
-      `${base}?q=${encodeURIComponent(qParam)}&maxResults=${max}${tr}${keyQ}`,
-    );
-    if (!ok || !data.items?.length) return null;
-    return pickBestGoogleItem(data.items, t || qParam, a);
-  };
-
-  const googleTryNoLang = async (qParam, max) => {
-    const { ok, data } = await fetchGoogleVolumes(
-      `${base}?q=${encodeURIComponent(qParam)}&maxResults=${max}${keyQ}`,
-    );
-    if (!ok || !data.items?.length) return null;
-    return pickBestGoogleItem(data.items, t || qParam, a);
-  };
-
-  let found = null;
-
-  // 1) ISBN
-  if (isbnDigits && String(isbnDigits).replace(/\D/g, "").length >= 10) {
-    const digits = String(isbnDigits).replace(/\D/g, "");
-    const { ok, data } = await fetchGoogleVolumes(
-      `${base}?q=isbn:${encodeURIComponent(digits)}${keyQ}`,
-    );
-    if (ok && data.items?.length) {
-      if (t.length >= 3) {
-        found = pickBestGoogleItem(data.items, t, a);
-      }
-      if (!found) {
-        found = pickCoverFromVolumeInfo(data.items[0].volumeInfo);
-      }
-    }
-  }
-
-  // 2) intitle + inauthor
-  if (!found && t.length >= 2) {
-    let q = `intitle:${t}`;
-    if (a.length >= 2) q += ` inauthor:${a}`;
-    found = await googleTry(q, 15);
-  }
-
-  // 3) Sadece başlık (yazar Google’da eşleşmeyebilir)
-  if (!found && t.length >= 2) {
-    found = await googleTry(`intitle:${t}`, 15);
-  }
-
-  // 4) Serbest metin (dil kısıtı yok — yabancı baskı kapağı gelebilir)
-  if (!found && t.length >= 2) {
-    const loose = a.length >= 2 ? `${t} ${a}` : t;
-    found = await googleTryNoLang(loose, 12);
-  }
-
-  // 5) Open Library (API anahtarı gerekmez)
-  if (!found && t.length >= 2) {
-    found = await openLibrarySearchCover(t, a);
-  }
-
-  if (found) {
-    coverCache.set(cacheKey, found);
-    return { url: found, needsApiKey: false };
-  }
-
-  coverCache.set(cacheKey, null);
-  return { url: null, needsApiKey: false };
-}
-
-// :isbn rotası "lookup" kelimesini yutmasın diye önce tam yol:
-app.get("/api/kapak/lookup", async (req, res) => {
+  let target;
   try {
-    const isbnDigits = String(req.query.isbn || "").replace(/\D/g, "");
-    const title = typeof req.query.baslik === "string" ? req.query.baslik : "";
-    const author = typeof req.query.yazar === "string" ? req.query.yazar : "";
-    if (isbnDigits.length < 10 && String(title).trim().length < 2) {
-      return res.json({
-        url: null,
-        needsApiKey: !process.env.GOOGLE_BOOKS_API_KEY?.trim(),
-      });
-    }
-    const out = await resolveCoverFromGoogle({ isbnDigits, title, author });
-    res.json(out);
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ url: null, needsApiKey: false });
+    target = decodeURIComponent(raw.trim());
+  } catch {
+    return res.status(400).type("text/plain").send("geçersiz url");
   }
-});
-
-app.get("/api/kapak/:isbn", async (req, res) => {
+  if (!isSafeRemoteImageUrl(target)) {
+    return res.status(400).type("text/plain").send("izin verilmeyen adres");
+  }
+  const maxBytes = 5 * 1024 * 1024;
   try {
-    const digits = String(req.params.isbn || "").replace(/\D/g, "");
-    if (digits.length < 10) {
-      return res.json({ url: null, needsApiKey: !process.env.GOOGLE_BOOKS_API_KEY?.trim() });
-    }
-    if (!process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
-      return res.json({ url: null, needsApiKey: true });
-    }
-    const out = await resolveCoverFromGoogle({
-      isbnDigits: digits,
-      title: "",
-      author: "",
+    const r = await fetch(target, {
+      headers: { "User-Agent": "Kutuphane-Otomasyon-CoverProxy/1.0" },
+      redirect: "follow",
     });
-    res.json({ ...out, needsApiKey: false });
+    if (!r.ok) {
+      return res.status(502).type("text/plain").send("kaynak yanıt vermedi");
+    }
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > maxBytes) {
+      return res.status(413).type("text/plain").send("dosya çok büyük");
+    }
+    let ct = (r.headers.get("content-type") || "").split(";")[0].trim();
+    if (!ct.startsWith("image/")) {
+      const guessed = sniffImageMime(buf);
+      if (guessed) ct = guessed;
+      else {
+        return res.status(415).type("text/plain").send("içerik görsel değil");
+      }
+    }
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    res.send(buf);
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ url: null, needsApiKey: false });
+    console.error("cover-proxy", err.message);
+    res.status(502).type("text/plain").send("indirilemedi");
   }
 });
+
+const dbUrl = (process.env.DATABASE_URL || process.env.SUPABASE_DB_URL || "").trim();
+const useSsl = process.env.DB_SSL === "false" ? false : { rejectUnauthorized: false };
+
+const pool = dbUrl
+  ? new Pool({
+      connectionString: dbUrl,
+      ssl: useSsl,
+    })
+  : new Pool({
+      user: process.env.PGUSER || "postgres",
+      password: process.env.PGPASSWORD || "123456",
+      host: process.env.PGHOST || "localhost",
+      port: Number(process.env.PGPORT) || 5432,
+      database: process.env.PGDATABASE || "KutuphaneOtomasyon",
+      ssl: process.env.PGHOST ? useSsl : false,
+    });
 
 // 1. Liste (limit: varsayılan 50, en fazla 200)
 app.get("/api/kitaplar", async (req, res) => {
@@ -321,11 +137,4 @@ app.get("/api/kitaplar/:isbn", async (req, res) => {
 
 app.listen(5000, () => {
   console.log("Backend sunucusu http://localhost:5000 adresinde çalışıyor...");
-  if (!process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
-    console.warn(
-      "[kapak] GOOGLE_BOOKS_API_KEY yok — kapaklar Google Books’tan çekilemez (backend/.env).",
-    );
-  } else {
-    console.log("[kapak] Google Books API anahtarı yüklendi.");
-  }
 });

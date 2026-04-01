@@ -3,6 +3,9 @@ import { useNavigate } from "react-router-dom";
 import { motion, useReducedMotion } from "framer-motion";
 import HorizontalBookRow from "../components/HorizontalBookRow";
 import SmartBookCover from "../components/SmartBookCover";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Input from "../components/ui/Input";
 import { fetchLocalBooks } from "../services/dbBooks";
 
 export default function Home() {
@@ -27,8 +30,6 @@ export default function Home() {
       .then((data) => {
         if (cancelled) return;
 
-        // dbBooks.js veriyi zaten bizim için kusursuz hazırladı.
-        // Artık Home.jsx içinde dönüştürme yapmadan direkt bölüştürüyoruz!
         setWeeklyPopular(data.slice(0, 10));
         setStartWithThese(data.slice(10, 20));
         setMostLoved(data.slice(20, 30));
@@ -65,6 +66,7 @@ export default function Home() {
   ];
   const topPreviewBooks = buildPreviewBooks(turkishBooks, classics, 8);
   const bottomPreviewBooks = buildPreviewBooks(classics, turkishBooks, 8);
+  const quickSearches = ["Roman", "Tarih", "Bilim kurgu"];
 
   return (
     <div className="bg-surface">
@@ -89,7 +91,7 @@ export default function Home() {
           aria-hidden
         />
         <div
-          className="pointer-events-none absolute -right-20 -top-20 h-72 w-72 rounded-full bg-accent/25 blur-3xl motion-reduce:animate-none animate-hero-blob"
+          className="pointer-events-none absolute -right-20 -top-20 hidden h-72 w-72 rounded-full bg-accent/25 blur-3xl motion-reduce:animate-none md:block animate-hero-blob"
           aria-hidden
         />
         <div
@@ -168,28 +170,41 @@ export default function Home() {
             onSubmit={onSearch}
             className="mx-auto flex max-w-2xl flex-col gap-3 sm:flex-row sm:items-stretch"
           >
-            <motion.input
-              type="search"
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Kitap, yazar veya konu ara..."
-              className="h-12 flex-1 rounded-full border-0 bg-white/95 px-5 text-ink shadow-lg placeholder:text-ink/40 focus:outline-none focus:ring-2 focus:ring-accent md:h-14"
-              aria-label="Arama"
+            <motion.div
+              className="flex-1"
               whileFocus={reduce ? undefined : { scale: 1.01 }}
-              transition={{ type: "spring", stiffness: 400, damping: 30 }}
-            />
-            <motion.button
-              type="submit"
-              className="h-12 shrink-0 rounded-full bg-accent px-8 font-semibold text-white shadow-lg md:h-14"
-              whileHover={
-                reduce ? undefined : { scale: 1.04, backgroundColor: "#E85D2C" }
-              }
-              whileTap={reduce ? undefined : { scale: 0.97 }}
-              transition={{ type: "spring", stiffness: 450, damping: 22 }}
             >
-              Ara
-            </motion.button>
+              <Input
+                type="search"
+                value={q}
+                onChange={(e) => setQ(e.target.value)}
+                placeholder="Kitap, yazar veya konu ara..."
+                className="h-12 rounded-full border-0 bg-white/95 px-5 text-ink shadow-lg placeholder:text-ink/40 md:h-14"
+                aria-label="Arama"
+              />
+            </motion.div>
+            <motion.div
+              whileHover={reduce ? undefined : { scale: 1.03 }}
+              whileTap={reduce ? undefined : { scale: 0.97 }}
+            >
+              <Button type="submit" size="pill" className="h-12 shrink-0 md:h-14">
+                Ara
+              </Button>
+            </motion.div>
           </motion.form>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            {quickSearches.map((item) => (
+              <Button
+                key={item}
+                variant="ghost"
+                size="sm"
+                className="rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
+                onClick={() => navigate(`/katalog?q=${encodeURIComponent(item)}`)}
+              >
+                {item}
+              </Button>
+            ))}
+          </div>
 
           {error && (
             <div className="mx-auto mt-4 w-full max-w-3xl rounded-xl border border-red-200/70 bg-red-50/95 px-4 py-3 text-left text-sm text-red-900 shadow">
@@ -234,11 +249,11 @@ export default function Home() {
                     >
                       <SmartBookCover
                         src={book.volumeInfo?.imageLinks?.thumbnail}
-                        isbnDigits={book.isbnDigits}
+                        fallbackSrc={book.coverFallbackUrl}
                         title={book.volumeInfo?.title}
-                        authorLine={book.volumeInfo?.authors?.[0] || ""}
-                        className="h-full w-full rounded-md"
-                        imageClassName="h-full w-full scale-[1.08] object-cover saturate-110 transition-transform duration-500 hover:scale-[1.12]"
+                        decorative
+                        variant="hero"
+                        imageClassName="h-full w-full scale-[1.08] rounded-md object-cover saturate-110 transition-transform duration-500 hover:scale-[1.12]"
                       />
                     </div>
                   ))}
@@ -269,11 +284,11 @@ export default function Home() {
                       >
                         <SmartBookCover
                           src={book.volumeInfo?.imageLinks?.thumbnail}
-                          isbnDigits={book.isbnDigits}
+                          fallbackSrc={book.coverFallbackUrl}
                           title={book.volumeInfo?.title}
-                          authorLine={book.volumeInfo?.authors?.[0] || ""}
-                          className="h-full w-full rounded-md"
-                          imageClassName="h-full w-full scale-[1.08] object-cover saturate-110 transition-transform duration-500 hover:scale-[1.12]"
+                          decorative
+                          variant="hero"
+                          imageClassName="h-full w-full scale-[1.08] rounded-md object-cover saturate-110 transition-transform duration-500 hover:scale-[1.12]"
                         />
                       </div>
                     ),
@@ -286,7 +301,7 @@ export default function Home() {
       </section>
 
       <div className="mx-auto -mt-16 max-w-6xl px-4 md:-mt-20 md:px-6">
-        <section className="rounded-2xl border border-white/70 bg-white/90 p-5 shadow-[0_18px_50px_rgba(20,30,50,0.14)] backdrop-blur md:p-7">
+        <Card className="rounded-2xl border border-white/70 bg-white/90 p-5 backdrop-blur md:p-7">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {quickStats.map((item) => (
               <div
@@ -302,12 +317,13 @@ export default function Home() {
               </div>
             ))}
           </div>
-        </section>
+        </Card>
       </div>
 
       <div className="mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-14">
         <HorizontalBookRow
           title="Haftanın Popüler Kitapları"
+          subtitle="Bu hafta okuyucularin en cok ilgi gosterdigi secimler."
           books={weeklyPopular}
           loading={loading}
           error={error}
@@ -316,6 +332,7 @@ export default function Home() {
         />
         <HorizontalBookRow
           title="Bu Kitaplarla Başla"
+          subtitle="Yeni bir okuma rutini icin ideal baslangic listesi."
           books={startWithThese}
           loading={loading}
           error={error}
@@ -324,6 +341,7 @@ export default function Home() {
         />
         <HorizontalBookRow
           title="En Sevilen Kitaplar"
+          subtitle="Uzun sure trendde kalan ve tekrar tekrar onerilen eserler."
           books={mostLoved}
           loading={loading}
           error={error}
@@ -332,6 +350,7 @@ export default function Home() {
         />
         <HorizontalBookRow
           title="Son Eklenen Kitaplar"
+          subtitle="Kataloga yeni eklenen guncel kitaplari kacirma."
           books={recentlyAdded}
           loading={loading}
           error={error}
@@ -359,7 +378,7 @@ export default function Home() {
 }
 
 function buildPreviewBooks(primaryBooks = [], secondaryBooks = [], target = 8) {
-  const pick = (b) => Boolean(b.volumeInfo?.title);
+  const pick = (b) => Boolean(b.thumbnail && b.volumeInfo?.title);
   const primary = primaryBooks.filter(pick);
   const secondary = secondaryBooks.filter(pick);
   const pool = [...primary, ...secondary];

@@ -10,10 +10,11 @@ CREATE TABLE IF NOT EXISTS kitaplar (
   ilgili_kategoriler TEXT,
   kategoriler TEXT,
   fiyat NUMERIC(10, 2),
-  -- İsteğe bağlı: gerçek kapak görseli URL’si (Open Library yetersiz kaldığında)
+  -- Kapak görseli (tam https://… adresi); yoksa uygulama kitabı listede göstermez
   kapak_url TEXT
 );
 
 -- Mevcut tabloya eklemek için:
 -- ALTER TABLE kitaplar ADD COLUMN IF NOT EXISTS kapak_url TEXT;
--- Açıklama için alternatif sütun adları kullanıyorsanız uygulama şunları da okur: aciklama, ozet, ozet_metin
+-- Kapak görseli: kapak_url (veya frontend’de tanımlı diğer sütun adları — bkz. dbBooks.js pickCoverUrlFromRow)
+-- Açıklama alternatifleri: aciklama, ozet, ozet_metin
