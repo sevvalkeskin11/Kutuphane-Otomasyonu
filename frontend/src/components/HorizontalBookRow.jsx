@@ -1,5 +1,6 @@
 import { motion, useReducedMotion } from "framer-motion";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
+import { useState } from "react";
 import BookCard from "./BookCard";
 
 function MarqueeStrip({ books, reverse = false }) {
@@ -8,7 +9,7 @@ function MarqueeStrip({ books, reverse = false }) {
 
   if (reduce) {
     return (
-      <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-hide md:-mx-6 md:px-6">
+      <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
         {books.map((b) => (
           <div key={b.id} className="snap-start">
             <BookCard book={b} />
@@ -38,7 +39,7 @@ function MarqueeStrip({ books, reverse = false }) {
 
 function ScrollStrip({ books }) {
   return (
-    <div className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 scrollbar-hide md:-mx-6 md:px-6">
+    <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
       {books.map((b) => (
         <div key={b.id} className="snap-start">
           <BookCard book={b} />
@@ -61,16 +62,32 @@ export default function HorizontalBookRow({
   className = "",
 }) {
   const reduce = useReducedMotion();
+  const navigate = useNavigate();
+  const [isExpanding, setIsExpanding] = useState(false);
+
+  function handleShowAllClick(e) {
+    if (!actionTo || reduce) return;
+    e.preventDefault();
+    setIsExpanding(true);
+    setTimeout(() => navigate(actionTo), 190);
+  }
 
   return (
     <motion.section
-      className={`mb-10 rounded-2xl border border-ink/8 bg-white p-4 shadow-card md:mb-12 md:p-6 ${className}`}
+      className={`mb-10 rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/70 p-4 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-xl md:mb-12 md:p-6 ${className}`}
       initial={reduce ? false : { opacity: 0, y: 28 }}
+      animate={
+        reduce
+          ? undefined
+          : isExpanding
+            ? { scale: 1.03, y: -4, boxShadow: "0 18px 40px rgba(15, 23, 42, 0.16)" }
+            : { scale: 1, y: 0, boxShadow: "0 6px 18px rgba(15, 23, 42, 0.08)" }
+      }
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true, amount: 0.12, margin: "0px 0px -8% 0px" }}
       transition={{ duration: reduce ? 0 : 0.55, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3">
+      <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200/80 pb-4">
         <div>
           <h2 className="text-xl font-bold tracking-tight text-ink md:text-[1.7rem]">
             {title}
@@ -84,7 +101,8 @@ export default function HorizontalBookRow({
         {actionTo && (
           <Link
             to={actionTo}
-            className="inline-flex items-center gap-2 text-sm font-medium text-ink/60 hover:text-ink"
+            onClick={handleShowAllClick}
+            className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1.5 text-sm font-medium text-slate-700 transition hover:bg-slate-200 hover:text-slate-900"
           >
             {actionLabel}
             <svg
@@ -105,7 +123,7 @@ export default function HorizontalBookRow({
         )}
         {!loading && !error && books?.length > 0 && (
           <span
-            className="hidden items-center gap-1 text-xs font-medium text-ink/40 sm:flex motion-reduce:animate-none animate-scroll-hint"
+            className="hidden items-center gap-1 text-xs font-medium text-slate-500 sm:flex motion-reduce:animate-none animate-scroll-hint"
             aria-hidden
           >
             Üzerine gelince durur · tıklayarak detay
@@ -126,6 +144,12 @@ export default function HorizontalBookRow({
           </span>
         )}
       </div>
+      {!loading && !error && books?.length > 0 && (
+        <p className="mb-3 flex items-center gap-1 text-xs text-ink/45 sm:hidden">
+          Kaydırarak keşfet
+          <span aria-hidden>→</span>
+        </p>
+      )}
       {error && (
         <p className="rounded-card border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
           {error}
@@ -158,7 +182,24 @@ export default function HorizontalBookRow({
               <MarqueeStrip books={books} reverse={reverse} />
             )
           ) : (
-            <p className="text-sm text-ink/50">Kitap bulunamadı.</p>
+            <div className="flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white px-3 py-5 text-center">
+              <svg
+                className="mb-2 h-7 w-7 text-slate-300"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                aria-hidden
+              >
+                <path
+                  d="M4 6.5A2.5 2.5 0 016.5 4H20v14H6.5A2.5 2.5 0 004 20.5v-14z"
+                  strokeWidth="1.5"
+                />
+                <path d="M8 8h8M8 11h8" strokeWidth="1.5" strokeLinecap="round" />
+              </svg>
+              <p className="text-sm font-medium text-slate-500">
+                Bu bölümde henüz kitap bulunamadı.
+              </p>
+            </div>
           )}
         </div>
       )}

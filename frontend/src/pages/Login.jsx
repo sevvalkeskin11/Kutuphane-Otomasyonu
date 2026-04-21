@@ -1,64 +1,107 @@
-import { Link } from 'react-router-dom'
-import { useState } from 'react'
+import { Link } from "react-router-dom";
+import { useState } from "react";
 
 export default function Login() {
-  const [email, setEmail] = useState('')
-  const [password, setPassword] = useState('')
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
 
   function onSubmit(e) {
-    e.preventDefault()
+    e.preventDefault();
     // JWT backend bağlandığında burada çağrılacak
-    alert('Giriş isteği gönderildi (demo). Backend JWT entegrasyonu eklenecek.')
+    alert(
+      "Giriş isteği gönderildi (demo). Backend JWT entegrasyonu eklenecek.",
+    );
   }
 
   return (
-    <div className="mx-auto max-w-md px-4 py-16 md:px-6">
-      <div className="rounded-card bg-white p-8 shadow-card">
-        <h1 className="mb-1 text-2xl font-bold text-ink">Giriş yap</h1>
-        <p className="mb-8 text-sm text-ink/55">Hesabınıza erişin ve ödünçlerinizi görün.</p>
-        <form onSubmit={onSubmit} className="space-y-5">
-          <div>
-            <label htmlFor="email" className="mb-1.5 block text-sm font-medium text-ink">
-              E-posta
-            </label>
-            <input
-              id="email"
-              type="email"
-              autoComplete="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              className="w-full rounded-lg border border-ink/10 bg-surface px-4 py-3 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-              required
-            />
+    <section className="relative flex min-h-[calc(100vh-140px)] items-start overflow-hidden px-4 py-8 md:px-6 md:py-10">
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{
+          backgroundImage:
+            "url('/pexels-ian-panelo-35644053.jpg')",
+          backgroundPosition: "center 24%",
+        }}
+      />
+      <div className="absolute inset-0 bg-black/45" />
+      <div className="relative mx-auto flex w-full max-w-5xl justify-center">
+        <div className="w-full max-w-md rounded-panel min-h-[560px] border border-white/35 bg-white/78 p-6 shadow-card backdrop-blur-sm sm:p-8">
+          <div className="mb-6">
+            <div className="mb-5 h-1.5 w-20 rounded-full bg-accent" />
+            <h1 className="mb-1 text-3xl font-bold text-white">
+              Tekrar hoş geldiniz
+            </h1>
+            <p className="text-sm text-white/85">
+              Devam etmek için hesabınıza giriş yapın.
+            </p>
           </div>
-          <div>
-            <label htmlFor="password" className="mb-1.5 block text-sm font-medium text-ink">
-              Şifre
-            </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full rounded-lg border border-ink/10 bg-surface px-4 py-3 text-ink outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20"
-              required
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full rounded-lg bg-night py-3 font-semibold text-white transition hover:bg-nightLight"
-          >
-            Giriş yap
-          </button>
-        </form>
-        <p className="mt-6 text-center text-sm text-ink/55">
-          Hesabınız yok mu?{' '}
-          <Link to="/kayit" className="font-semibold text-accent hover:text-accentDark">
-            Kayıt ol
-          </Link>
-        </p>
+
+          <form onSubmit={onSubmit} className="space-y-4">
+            <div className="space-y-1.5">
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-white"
+              >
+                E-posta
+              </label>
+              <input
+                id="email"
+                type="email"
+                autoComplete="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="w-full rounded-lg border border-white/60 bg-white/25 px-4 py-2.5 text-white outline-none placeholder:text-white/65 transition focus:border-white focus:ring-2 focus:ring-white/30"
+                required
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between">
+                <label
+                  htmlFor="password"
+                  className="block text-sm font-medium text-white"
+                >
+                  Şifre
+                </label>
+                <button
+                  type="button"
+                  className="text-xs text-white/80 transition hover:text-white"
+                >
+                  Şifremi unuttum
+                </button>
+              </div>
+              <input
+                id="password"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="w-full rounded-lg border border-white/60 bg-white/25 px-4 py-2.5 text-white outline-none placeholder:text-white/65 transition focus:border-white focus:ring-2 focus:ring-white/30"
+                required
+              />
+            </div>
+
+            <div className="h-[86px]" aria-hidden="true" />
+
+            <button
+              type="submit"
+              className="w-full rounded-lg bg-accent py-3 font-semibold text-white transition hover:bg-accentDark"
+            >
+              Giriş yap
+            </button>
+          </form>
+
+          <p className="mt-6 text-center text-sm text-white/85">
+            Hesabınız yok mu?{" "}
+            <Link
+              to="/kayit"
+              className="font-semibold text-accent transition hover:text-accentDark"
+            >
+              Kayıt ol
+            </Link>
+          </p>
+        </div>
       </div>
-    </div>
-  )
+    </section>
+  );
 }

@@ -12,6 +12,12 @@
   }
 }
 
+@layer components {
+  .ui-card {
+    @apply rounded-card bg-white shadow-card;
+  }
+}
+
 @layer utilities {
   .scrollbar-hide {
     -ms-overflow-style: none;

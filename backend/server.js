@@ -5,6 +5,8 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 const express = require("express");
 const cors = require("cors");
 const { Pool } = require("pg");
+const { isSafeRemoteImageUrl } = require("./scripts/coverProxyUtils");
+const { sniffImageMime } = require("./scripts/sniffImageMime");
 
 const PORT = Number(process.env.PORT) || 5050;
 const DEFAULT_BORROW_DAYS = Number.parseInt(process.env.DEFAULT_BORROW_DAYS || "14", 10) || 14;
@@ -39,6 +41,56 @@ app.use(
   }),
 );
 app.use(express.json({ limit: "1mb" }));
+
+app.use("/covers", express.static(path.join(__dirname, "public", "covers"), { maxAge: "7d" }));
+
+app.get("/api/cover-proxy", async (req, res) => {
+  const raw = req.query.url;
+  if (typeof raw !== "string" || !raw.trim()) {
+    return res.status(400).type("text/plain").send("url parametresi gerekli");
+  }
+
+  let target;
+  try {
+    target = decodeURIComponent(raw.trim());
+  } catch {
+    return res.status(400).type("text/plain").send("gecersiz url");
+  }
+
+  if (!isSafeRemoteImageUrl(target)) {
+    return res.status(400).type("text/plain").send("izin verilmeyen adres");
+  }
+
+  const maxBytes = 5 * 1024 * 1024;
+  try {
+    const r = await fetch(target, {
+      headers: { "User-Agent": "Kutuphane-Otomasyon-CoverProxy/1.0" },
+      redirect: "follow",
+    });
+    if (!r.ok) {
+      return res.status(502).type("text/plain").send("kaynak yanit vermedi");
+    }
+
+    const buf = Buffer.from(await r.arrayBuffer());
+    if (buf.length > maxBytes) {
+      return res.status(413).type("text/plain").send("dosya cok buyuk");
+    }
+
+    let ct = (r.headers.get("content-type") || "").split(";")[0].trim();
+    if (!ct.startsWith("image/")) {
+      const guessed = sniffImageMime(buf);
+      if (guessed) ct = guessed;
+      else return res.status(415).type("text/plain").send("icerik gorsel degil");
+    }
+
+    res.setHeader("Content-Type", ct);
+    res.setHeader("Cache-Control", "public, max-age=86400");
+    return res.send(buf);
+  } catch (err) {
+    console.error("cover-proxy", err?.message || err);
+    return res.status(502).type("text/plain").send("indirilemedi");
+  }
+});
 app.use((req, _res, next) => {
   const header = String(req.headers.authorization || "");
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : "";
