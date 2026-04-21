@@ -2,14 +2,15 @@
   "name": "backend",
   "version": "1.0.0",
   "description": "",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node server.js",
     "download-covers": "node scripts/downloadCovers.js",
     "fetch-covers-internet": "node scripts/fetchCoversInternet.js",
     "fetch-covers-999": "node -e \"process.env.FETCH_LIMIT='999'; require('./scripts/fetchCoversInternet.js')\"",
-    "fetch-covers-500": "node -e \"process.env.FETCH_LIMIT='500'; require('./scripts/fetchCoversInternet.js')\""
+    "fetch-covers-500": "node -e \"process.env.FETCH_LIMIT='500'; require('./scripts/fetchCoversInternet.js')\"",
+    "import:books": "node scripts/import-books.js"
   },
   "keywords": [],
   "author": "",

@@ -244,6 +244,8 @@ export function openLibraryCoverByIsbn(isbnRaw) {
 }
 
 const formatBookData = (b, i) => {
+  // ARTIK ID OLARAK VERİTABANINDAKİ UUID'Yİ KULLANIYORUZ
+  const id = b.id || `local-${i}`;
   const isbnRaw = b.isbn != null ? String(b.isbn).trim() : "";
   const digits = isbnRaw.replace(/\D/g, "");
 
@@ -289,40 +291,46 @@ const formatBookData = (b, i) => {
   }
 
   const title = (b.kitap_adi && String(b.kitap_adi).trim()) || "Başlıksız";
-  const authorStr =
-    b.yazar != null && String(b.yazar).trim() !== ""
-      ? String(b.yazar).trim()
-      : "";
-  const authors = authorStr ? [authorStr] : [];
-  const rawCat = b.ilgili_kategoriler ?? b.kategoriler;
-  const categories = Array.isArray(rawCat)
-    ? rawCat.filter(Boolean)
-    : rawCat
-      ? [String(rawCat)]
-      : [];
-
-  const descRaw =
-    b.kitap_aciklamasi ?? b.aciklama ?? b.ozet ?? b.ozet_metin ?? "";
-  const description = String(descRaw || "").trim();
+  const authorStr = (b.yazar && String(b.yazar).trim()) || "Bilinmeyen Yazar";
+  const description =
+    (b.kitap_aciklamasi && String(b.kitap_aciklamasi).trim()) ||
+    (b.aciklama && String(b.aciklama).trim()) ||
+    (b.ozet && String(b.ozet).trim()) ||
+    (b.ozet_metin && String(b.ozet_metin).trim()) ||
+    "";
+  
+  // Kategorileri diziye çevirme
+  const categories = b.kategoriler 
+    ? String(b.kategoriler).split(',').map(c => c.trim()) 
+    : [];
 
   return {
-    id: isbnRaw || `local-${i}`,
-    isbnDigits: digits.length >= 10 ? digits : "",
+    id, // Veritabanındaki UUID
+    isbn: isbnRaw,
+    isbnDigits: digits,
     title,
-    authors,
+    authors: [authorStr],
     thumbnail: coverUrl,
     coverFallbackUrl,
     description,
     publishedDate: b.yayin_tarihi,
     pageCount: b.sayfa_sayisi,
     publisher: b.yayinevi,
-    price: b.fiyat,
+    // YENİ EKLENEN MÜHENDİSLİK ALANLARI
+    stockCount: b.stok_adedi || 0,
+    availableCount: b.mevcut_adet || 0,
+    shelfLocation: b.raf_konumu || "Bilinmiyor",
+    status: b.durum || "Bilinmiyor",
+    publishYear: b.basim_yili,
+    registrationDate: b.kayit_tarihi,
+    
+    // Google Books yapısıyla uyumlu kalması için volumeInfo objesi
     volumeInfo: {
       title,
-      authors,
+      authors: [authorStr],
       publisher: b.yayinevi,
-      publishedDate: b.yayin_tarihi,
-      description,
+      publishedDate: b.basim_yili ? String(b.basim_yili) : b.yayin_tarihi,
+      description: b.kitap_aciklamasi || "",
       pageCount: b.sayfa_sayisi,
       categories,
       imageLinks: {
@@ -338,19 +346,21 @@ export const fetchLocalBooks = async (limit = 200) => {
   const response = await fetch(apiUrl(`/api/kitaplar?limit=${encodeURIComponent(String(n))}`));
   const data = await parseJsonResponse(response);
   if (!Array.isArray(data)) throw new Error("Kitap listesi alınamadı");
-  return filterBooksWithCoverUrl(data.map(formatBookData));
+  return data.map((b, i) => formatBookData(b, i));
 };
 
 export const searchLocalBooks = async (query) => {
+  if (!query) return [];
   const response = await fetch(
-    apiUrl(`/api/kitaplar/ara?q=${encodeURIComponent(query || "")}`),
+    apiUrl(`/api/kitaplar/ara?q=${encodeURIComponent(query)}`),
   );
   const data = await parseJsonResponse(response);
   if (!Array.isArray(data)) throw new Error("Arama sonucu alınamadı");
-  return filterBooksWithCoverUrl(data.map(formatBookData));
+  return data.map((b, i) => formatBookData(b, i));
 };
 
 export const getLocalBookById = async (id) => {
+  // Artık ID parametresi UUID (örn: 550e8400...) bekliyor
   const response = await fetch(apiUrl(`/api/kitaplar/${encodeURIComponent(id)}`));
   const data = await parseJsonResponse(response);
   return formatBookData(data, 0);
