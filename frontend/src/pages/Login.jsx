@@ -1,16 +1,41 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [hataMesaji, setHataMesaji] = useState(""); // Hataları ekranda göstermek için
+  const navigate = useNavigate(); // Giriş başarılıysa yönlendirmek için
 
-  function onSubmit(e) {
+  async function onSubmit(e) {
     e.preventDefault();
-    // JWT backend bağlandığında burada çağrılacak
-    alert(
-      "Giriş isteği gönderildi (demo). Backend JWT entegrasyonu eklenecek.",
-    );
+    setHataMesaji(""); // Yeni denemede eski hatayı temizle
+
+    try {
+      // 1. Backend'e isteği at
+      const response = await fetch("http://localhost:5050/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email, password }),
+      });
+
+      const data = await response.json();
+
+      // 2. Eğer backend hata dönerse (örn: yanlış şifre)
+      if (!response.ok) {
+        throw new Error(data.error || "Giriş yapılamadı.");
+      }
+
+      // 3. Başarılıysa! Token'ı ve kullanıcıyı tarayıcıya kaydet
+      localStorage.setItem("token", data.token);
+      localStorage.setItem("user", JSON.stringify(data.user));
+
+      // 4. Anasayfaya yönlendir
+      navigate("/"); 
+
+    } catch (err) {
+      setHataMesaji(err.message); // Hatayı ekrana basmak için state'e kaydet
+    }
   }
 
   return (
@@ -18,8 +43,7 @@ export default function Login() {
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage:
-            "url('/pexels-ian-panelo-35644053.jpg')",
+          backgroundImage: "url('/pexels-ian-panelo-35644053.jpg')",
           backgroundPosition: "center 24%",
         }}
       />
@@ -36,14 +60,16 @@ export default function Login() {
             </p>
           </div>
 
+          {/* Hata varsa ekranda kırmızı bir kutu içinde göster */}
+          {hataMesaji && (
+            <div className="mb-4 rounded bg-red-500/80 p-3 text-sm text-white backdrop-blur">
+              {hataMesaji}
+            </div>
+          )}
+
           <form onSubmit={onSubmit} className="space-y-4">
             <div className="space-y-1.5">
-              <label
-                htmlFor="email"
-                className="block text-sm font-medium text-white"
-              >
-                E-posta
-              </label>
+              <label htmlFor="email" className="block text-sm font-medium text-white">E-posta</label>
               <input
                 id="email"
                 type="email"
@@ -57,18 +83,8 @@ export default function Login() {
 
             <div className="space-y-1.5">
               <div className="flex items-center justify-between">
-                <label
-                  htmlFor="password"
-                  className="block text-sm font-medium text-white"
-                >
-                  Şifre
-                </label>
-                <button
-                  type="button"
-                  className="text-xs text-white/80 transition hover:text-white"
-                >
-                  Şifremi unuttum
-                </button>
+                <label htmlFor="password" className="block text-sm font-medium text-white">Şifre</label>
+                <button type="button" className="text-xs text-white/80 transition hover:text-white">Şifremi unuttum</button>
               </div>
               <input
                 id="password"
@@ -83,22 +99,14 @@ export default function Login() {
 
             <div className="h-[86px]" aria-hidden="true" />
 
-            <button
-              type="submit"
-              className="w-full rounded-lg bg-accent py-3 font-semibold text-white transition hover:bg-accentDark"
-            >
+            <button type="submit" className="w-full rounded-lg bg-accent py-3 font-semibold text-white transition hover:bg-accentDark">
               Giriş yap
             </button>
           </form>
 
           <p className="mt-6 text-center text-sm text-white/85">
             Hesabınız yok mu?{" "}
-            <Link
-              to="/kayit"
-              className="font-semibold text-accent transition hover:text-accentDark"
-            >
-              Kayıt ol
-            </Link>
+            <Link to="/kayit" className="font-semibold text-accent transition hover:text-accentDark">Kayıt ol</Link>
           </p>
         </div>
       </div>

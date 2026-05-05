@@ -4,6 +4,7 @@ require("dotenv").config({ path: path.join(__dirname, ".env") });
 
 const express = require("express");
 const cors = require("cors");
+const nodemailer = require("nodemailer");
 const { Pool } = require("pg");
 const { isSafeRemoteImageUrl } = require("./scripts/coverProxyUtils");
 const { sniffImageMime } = require("./scripts/sniffImageMime");
@@ -237,15 +238,21 @@ function adminRequired(req, res, next) {
   return next();
 }
 
+// HER ÇAĞRILDIĞINDA GECİKENLERİ BULUP CEZALARI HESAPLAYAN FONKSİYON
 async function syncOverdueLoans() {
+  const gunlukCeza = 5; // Geciken her gün için 5 TL ceza belirledik
+
+  // Postgres'te iki tarih birbirinden çıkarıldığında aradaki "gün" sayısını verir.
   await pool.query(
     `
       UPDATE odunc_islemleri
-      SET status = 'gecikti'
+      SET 
+        status = 'gecikti',
+        fine_amount = (CURRENT_DATE - due_date) * $1
       WHERE return_date IS NULL
         AND due_date < CURRENT_DATE
-        AND status = 'oduncte'
     `,
+    [gunlukCeza]
   );
 }
 
@@ -1073,6 +1080,295 @@ app.use((error, _req, res, _next) => {
   }
   return res.status(500).json({ error: "Sunucu hatasi", detail: error?.message || "Bilinmeyen hata" });
 });
+// ==========================================
+// 1. FAVORİLER / WISH LIST SİSTEMİ
+// ==========================================
+
+// A. Kullanıcının Kendi Favorilerini Getirme (GET)
+app.get(
+  "/api/favoriler",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub; // Giriş yapan kullanıcının ID'si
+    
+    const result = await pool.query(
+      `
+        SELECT f.id AS favori_islem_id, k.*
+        FROM favoriler f
+        JOIN kitaplar k ON f.kitap_isbn = k.isbn
+        WHERE f.user_id = $1
+        ORDER BY f.created_at DESC
+      `,
+      [userId]
+    );
+    
+    res.json(result.rows);
+  })
+);
+
+// B. Kitabı Favorilere Ekleme (POST)
+app.post(
+  "/api/favoriler",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub;
+    const { kitapIsbn } = req.body;
+
+    if (!kitapIsbn) return res.status(400).json({ error: "kitapIsbn zorunludur" });
+
+    try {
+      await pool.query(
+        "INSERT INTO favoriler (user_id, kitap_isbn) VALUES ($1, $2)",
+        [userId, kitapIsbn]
+      );
+      res.status(201).json({ message: "Kitap favorilere eklendi! 💚" });
+    } catch (err) {
+      // 23505 PostgreSQL'de "Unique Violation" (Zaten var) hatasıdır
+      if (err.code === "23505") {
+        return res.status(409).json({ error: "Bu kitap zaten favorilerinizde." });
+      }
+      throw err; // Başka bir hataysa genel hata yakalayıcıya (error handler) gönder
+    }
+  })
+);
+
+// C. Kitabı Favorilerden Çıkarma (DELETE)
+app.delete(
+  "/api/favoriler/:isbn",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub;
+    const kitapIsbn = req.params.isbn;
+
+    const result = await pool.query(
+      "DELETE FROM favoriler WHERE user_id = $1 AND kitap_isbn = $2 RETURNING id",
+      [userId, kitapIsbn]
+    );
+
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: "Favorilerinizde böyle bir kitap bulunamadı." });
+    }
+
+    res.json({ message: "Kitap favorilerden çıkarıldı." });
+  })
+);
+// ==========================================
+// 2. PROFİL YÖNETİMİ (GÜNCELLEME)
+// ==========================================
+
+app.put(
+  "/api/auth/guncelle",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub; // Giriş yapan kullanıcının ID'si
+    
+    // Frontend'den gelme ihtimali olan veriler
+    const { fullName, phoneNumber, address, newPassword } = req.body;
+
+    // 1. Önce kullanıcının mevcut verilerini veritabanından çek
+    const userResult = await pool.query(
+      "SELECT * FROM kullanicilar WHERE id = $1",
+      [userId]
+    );
+
+    if (!userResult.rows.length) {
+      return res.status(404).json({ error: "Kullanıcı bulunamadı." });
+    }
+
+    const currentUser = userResult.rows[0];
+
+    // 2. Şifre değişecekse güvenli bir şekilde şifrele (Hash), değişmeyecekse eski şifreyi koru
+    let finalPasswordHash = currentUser.password_hash;
+    
+    if (newPassword && newPassword.trim().length >= 8) {
+      finalPasswordHash = hashPassword(newPassword); // server.js içindeki senin kripto fonksiyonun
+    } else if (newPassword && newPassword.trim().length > 0) {
+      return res.status(400).json({ error: "Yeni şifre en az 8 karakter olmalıdır." });
+    }
+
+    // 3. Verileri güncelle (Eğer frontend'den boş geldiyse, eski veriyi koru)
+    const updatedFullName = fullName !== undefined ? fullName : currentUser.full_name;
+    const updatedPhone = phoneNumber !== undefined ? phoneNumber : currentUser.phone_number;
+    const updatedAddress = address !== undefined ? address : currentUser.address;
+
+    // 4. Veritabanına yeni hallerini yaz
+    const updateQuery = await pool.query(
+      `
+        UPDATE kullanicilar
+        SET full_name = $1, phone_number = $2, address = $3, password_hash = $4
+        WHERE id = $5
+        RETURNING id, full_name, email, role, phone_number, address
+      `,
+      [updatedFullName, updatedPhone, updatedAddress, finalPasswordHash, userId]
+    );
+
+    res.json({
+      message: "Profil bilgileri başarıyla güncellendi! ✅",
+      user: updateQuery.rows[0]
+    });
+  })
+);
+// ==========================================
+// 3. DİNAMİK KATEGORİ LİSTESİ
+// ==========================================
+
+app.get(
+  "/api/kategoriler",
+  asyncHandler(async (req, res) => {
+    // Veritabanındaki boş olmayan tüm kategori satırlarını çek
+    const result = await pool.query(`
+      SELECT DISTINCT kategoriler 
+      FROM kitaplar 
+      WHERE kategoriler IS NOT NULL AND kategoriler != ''
+    `);
+
+    const kategoriSet = new Set();
+
+    // Verileri temizle ve parçala (Eğer "Roman, Kurgu" diye virgüllü kayıt varsa ayırır)
+    result.rows.forEach(row => {
+      const cats = row.kategoriler.split(','); 
+      cats.forEach(c => {
+        const trimmed = c.trim();
+        // Sadece ilk harfi büyük, diğerleri küçük formata sok (Görsellik için)
+        if (trimmed) {
+          const formatli = trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+          kategoriSet.add(formatli);
+        }
+      });
+    });
+
+    // Set'i diziye çevir ve Türkçe alfabe kurallarına göre A'dan Z'ye sırala
+    const siraliKategoriler = Array.from(kategoriSet).sort((a, b) => a.localeCompare(b, "tr"));
+    
+    res.json(siraliKategoriler);
+  })
+);
+
+// ==========================================
+// 4. CEZA / BORÇ SORGULAMA SİSTEMİ
+// ==========================================
+
+app.get(
+  "/api/profil/cezalarim",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub;
+    
+    // Kullanıcıya güncel veriyi göstermek için önce cezaları hesaplatıyoruz
+    await syncOverdueLoans();
+    
+    const result = await pool.query(
+      `
+        SELECT o.id, k.kitap_adi, o.due_date, o.fine_amount
+        FROM odunc_islemleri o
+        JOIN kitaplar k ON o.kitap_isbn = k.isbn
+        WHERE o.user_id = $1 AND o.fine_amount > 0 AND o.return_date IS NULL
+      `,
+      [userId]
+    );
+    
+    // Tüm borçları topla (Total)
+    const toplamCeza = result.rows.reduce((acc, islem) => acc + Number(islem.fine_amount), 0);
+    
+    res.json({
+      mesaj: toplamCeza > 0 ? "Ödenmemiş gecikme cezalarınız bulunuyor." : "Hiç cezanız yok, harikasınız! 😇",
+      toplamBorc: toplamCeza,
+      detaylar: result.rows
+    });
+  })
+);
+// ==========================================
+// 5. ŞİFREMİ UNUTTUM & E-POSTA ENTEGRASYONU
+// ==========================================
+
+// E-posta gönderici (Transporter) ayarları
+const transporter = nodemailer.createTransport({
+  service: "gmail",
+  auth: {
+    user: process.env.SMTP_USER,
+    pass: process.env.SMTP_PASS,
+  },
+});
+
+// A. ŞİFRE SIFIRLAMA TALEBİ OLUŞTURMA VE MAİL ATMA
+app.post(
+  "/api/auth/sifre-sifirlama-talebi",
+  asyncHandler(async (req, res) => {
+    const email = normalizeEmail(req.body.email);
+    if (!email) return res.status(400).json({ error: "E-posta adresi gerekli." });
+
+    // 1. Kullanıcıyı bul
+    const userResult = await pool.query("SELECT id, full_name FROM kullanicilar WHERE email = $1", [email]);
+    if (!userResult.rows.length) {
+      // Güvenlik: Kullanıcı olmasa bile "gönderildi" diyoruz ki kötü niyetli kişiler sistemde hangi maillerin kayıtlı olduğunu bulamasın
+      return res.json({ message: "Eğer sistemimizde kaydınız varsa, sıfırlama bağlantısı gönderilmiştir." });
+    }
+
+    const user = userResult.rows[0];
+
+    // 2. Rastgele güvenli bir token oluştur ve 1 saat geçerlilik süresi ver
+    const resetToken = crypto.randomBytes(32).toString("hex");
+    const expireDate = new Date(Date.now() + 60 * 60 * 1000); // Şu an + 1 saat
+
+    // 3. Veritabanına kaydet
+    await pool.query(
+      "UPDATE kullanicilar SET reset_token = $1, reset_token_expiry = $2 WHERE id = $3",
+      [resetToken, expireDate, user.id]
+    );
+
+    // 4. E-postayı gönder (Frontend'in 5173 portunda çalıştığını varsayıyoruz)
+    const resetLink = `http://localhost:5173/sifre-yenile?token=${resetToken}`;
+    
+    await transporter.sendMail({
+      from: `"Kütüphane Otomasyonu" <${process.env.SMTP_USER}>`,
+      to: email,
+      subject: "Şifre Sıfırlama Talebi",
+      html: `
+        <h2>Merhaba ${user.full_name},</h2>
+        <p>Şifrenizi sıfırlamak için bir talepte bulundunuz. Aşağıdaki butona tıklayarak yeni şifrenizi belirleyebilirsiniz:</p>
+        <a href="${resetLink}" style="display:inline-block; padding:10px 20px; background-color:#3b82f6; color:white; text-decoration:none; border-radius:5px;">Şifremi Sıfırla</a>
+        <p><em>Not: Bu bağlantının süresi 1 saat içinde dolacaktır. Eğer bu talebi siz yapmadıysanız bu e-postayı dikkate almayın.</em></p>
+      `
+    });
+
+    res.json({ message: "Eğer sistemimizde kaydınız varsa, sıfırlama bağlantısı gönderilmiştir." });
+  })
+);
+
+// B. YENİ ŞİFREYİ KAYDETME
+app.post(
+  "/api/auth/sifre-yenile",
+  asyncHandler(async (req, res) => {
+    const { token, newPassword } = req.body;
+
+    if (!token || !newPassword || newPassword.length < 8) {
+      return res.status(400).json({ error: "Geçersiz istek veya şifre çok kısa (en az 8 karakter)." });
+    }
+
+    // 1. Token doğru mu ve süresi dolmamış mı kontrol et
+    const result = await pool.query(
+      "SELECT id FROM kullanicilar WHERE reset_token = $1 AND reset_token_expiry > CURRENT_TIMESTAMP",
+      [token]
+    );
+
+    if (!result.rows.length) {
+      return res.status(400).json({ error: "Geçersiz veya süresi dolmuş sıfırlama bağlantısı." });
+    }
+
+    const userId = result.rows[0].id;
+
+    // 2. Yeni şifreyi kriptola
+    const passwordHash = hashPassword(newPassword); // Senin sistemindeki hash fonksiyonu
+
+    // 3. Veritabanını güncelle ve token'ı temizle ki aynı link bir daha kullanılamasın
+    await pool.query(
+      "UPDATE kullanicilar SET password_hash = $1, reset_token = NULL, reset_token_expiry = NULL WHERE id = $2",
+      [passwordHash, userId]
+    );
+
+    res.json({ message: "Şifreniz başarıyla güncellendi. Artık yeni şifrenizle giriş yapabilirsiniz!" });
+  })
+);
 
 app.listen(PORT, () => {
   console.log(`Backend sunucusu http://localhost:${PORT} adresinde calisiyor.`);
@@ -1080,3 +1376,35 @@ app.listen(PORT, () => {
     console.warn("[kapak] GOOGLE_BOOKS_API_KEY yok, otomatik kapak endpointi bos donebilir.");
   }
 });
+
+// KULLANICININ KENDİ ÖDÜNÇ ALDIĞI KİTAPLARI GETİR
+app.get(
+  "/api/profil/odunclerim",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    // req.auth.sub -> Sisteme giriş yapmış kişinin token'ındaki ID'sidir
+    const userId = req.auth.sub; 
+
+    const result = await pool.query(
+      `
+        SELECT 
+          o.id, 
+          o.kitap_isbn, 
+          o.borrow_date, 
+          o.due_date, 
+          o.return_date, 
+          o.status,
+          k.kitap_adi,
+          k.yazar,
+          k.kapak_url
+        FROM odunc_islemleri o
+        INNER JOIN kitaplar k ON k.isbn = o.kitap_isbn
+        WHERE o.user_id = $1
+        ORDER BY o.borrow_date DESC
+      `,
+      [userId]
+    );
+
+    return res.json(result.rows);
+  })
+);
