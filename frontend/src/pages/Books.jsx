@@ -4,7 +4,6 @@ import BookCard from "../components/BookCard";
 import HorizontalBookRow from "../components/HorizontalBookRow";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
-import { fetchLocalBooks } from "../services/dbBooks";
 
 const CATALOG_SECTIONS = [
   { title: "Biyografi", keywords: ["biyografi", "yaşam öyküsü"] },
@@ -39,10 +38,11 @@ function normalizeCatalogQuery(q) {
   return q;
 }
 
+// 1. Arama motorunu kendi veritabanı sütunlarımıza uyarladık
 function catalogBookMatches(book, q, cat, author) {
-  const title = (book.title || "").toLowerCase();
-  const authors = (book.authors || []).join(" ").toLowerCase();
-  const cats = (book.volumeInfo?.categories || []).join(" ").toLowerCase();
+  const title = (book.kitap_adi || "").toLowerCase();
+  const authors = (book.yazar || "").toLowerCase();
+  const cats = (book.kategoriler || "").toLowerCase();
   const hay = `${title} ${authors} ${cats}`;
 
   if (q.trim()) {
@@ -59,11 +59,12 @@ function catalogBookMatches(book, q, cat, author) {
   return true;
 }
 
+// 2. Kategori bölümlerini (Roman, Tarih vb.) kendi sütunlarımıza göre ayırdık
 function booksForSection(all, keywords, sectionIndex) {
   const lower = keywords.map((k) => k.toLowerCase());
   const picked = all.filter((book) => {
-    const cats = (book.volumeInfo?.categories || []).join(" ").toLowerCase();
-    const title = (book.title || "").toLowerCase();
+    const cats = (book.kategoriler || "").toLowerCase();
+    const title = (book.kitap_adi || "").toLowerCase();
     const blob = `${cats} ${title}`;
     return lower.some((kw) => blob.includes(kw));
   });
@@ -97,11 +98,17 @@ export default function Books() {
     setVisibleCount(40);
   }, [searchParams]);
 
+  // 3. Sahte servis yerine gerçek Backend'e (PostgreSQL) bağlanıyoruz
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetchLocalBooks(200)
+    
+    fetch("http://localhost:5050/api/kitaplar?limit=200")
+      .then((res) => {
+        if (!res.ok) throw new Error("Sunucudan veri alınamadı");
+        return res.json();
+      })
       .then((data) => {
         if (!cancelled) setAllBooks(data);
       })
@@ -115,6 +122,7 @@ export default function Books() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+      
     return () => {
       cancelled = true;
     };
@@ -136,26 +144,29 @@ export default function Books() {
     return m;
   }, [allBooks]);
 
+  // 4. Kategori seçeneklerini senin veritabanındaki verilere göre çeker
   const categoryOptions = useMemo(() => {
     const set = new Set();
     DEFAULT_CATEGORY_OPTIONS.forEach((cat) => set.add(cat));
     allBooks.forEach((book) => {
-      (book.volumeInfo?.categories || []).forEach((cat) => {
-        const trimmed = String(cat || "").trim();
+      const cat = book.kategoriler;
+      if (cat) {
+        const trimmed = String(cat).trim();
         if (trimmed) set.add(trimmed);
-      });
+      }
     });
     return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [allBooks]);
 
+  // 5. Arama yaparken çıkan hızlı önerileri (dropdown) kendi verimize göre ayarladık
   const quickSuggestions = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return [];
     const pool = [];
     allBooks.forEach((book) => {
-      if (book.title) pool.push(book.title);
-      (book.authors || []).forEach((a) => pool.push(a));
-      (book.volumeInfo?.categories || []).forEach((c) => pool.push(c));
+      if (book.kitap_adi) pool.push(book.kitap_adi);
+      if (book.yazar) pool.push(book.yazar);
+      if (book.kategoriler) pool.push(book.kategoriler);
     });
     return [...new Set(pool)]
       .filter((item) => item.toLowerCase().includes(q))
@@ -196,7 +207,6 @@ export default function Books() {
 
   const gridBooks = filteredBooks.slice(0, visibleCount);
   const hasMore = filteredBooks.length > gridBooks.length;
-
   return (
     <div className="mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-14">
       <section
