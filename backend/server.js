@@ -1066,20 +1066,7 @@ app.post(
   }),
 );
 
-app.use((_req, res) => {
-  res.status(404).json({ error: "Rota bulunamadi" });
-});
 
-app.use((error, _req, res, _next) => {
-  console.error("[api]", error);
-  if (error?.code === "23505") {
-    return res.status(409).json({ error: "Kayit zaten mevcut" });
-  }
-  if (error?.code === "22P02") {
-    return res.status(400).json({ error: "Gecersiz parametre" });
-  }
-  return res.status(500).json({ error: "Sunucu hatasi", detail: error?.message || "Bilinmeyen hata" });
-});
 // ==========================================
 // 1. FAVORİLER / WISH LIST SİSTEMİ
 // ==========================================
@@ -1370,12 +1357,7 @@ app.post(
   })
 );
 
-app.listen(PORT, () => {
-  console.log(`Backend sunucusu http://localhost:${PORT} adresinde calisiyor.`);
-  if (!process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
-    console.warn("[kapak] GOOGLE_BOOKS_API_KEY yok, otomatik kapak endpointi bos donebilir.");
-  }
-});
+
 
 // KULLANICININ KENDİ ÖDÜNÇ ALDIĞI KİTAPLARI GETİR
 app.get(
@@ -1408,3 +1390,59 @@ app.get(
     return res.json(result.rows);
   })
 );
+
+// ==========================================
+// 6. ADMİN KİTAP YÖNETİMİ (EKLEME)
+// ==========================================
+
+app.post(
+  "/api/kitaplar",
+  authRequired,
+  adminRequired,
+  asyncHandler(async (req, res) => {
+    const { isbn, kitap_adi, yazar, yayinevi, kapak_url, stok_adedi, aciklama } = req.body;
+
+    if (!isbn || !kitap_adi) {
+      return res.status(400).json({ error: "ISBN ve Kitap Adı zorunludur." });
+    }
+
+    const insertQuery = await pool.query(
+      `INSERT INTO kitaplar (isbn, kitap_adi, yazar, yayinevi, kapak_url, stok_adedi, aciklama) 
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       RETURNING *`,
+      [
+        normalizeIsbn(isbn), 
+        kitap_adi.trim(), 
+        yazar?.trim() || null, 
+        yayinevi?.trim() || null, 
+        kapak_url?.trim() || null, 
+        parsePositiveInt(stok_adedi, 1), 
+        aciklama?.trim() || null
+      ]
+    );
+
+    res.status(201).json({ message: "Kitap başarıyla eklendi", kitap: insertQuery.rows[0] });
+  })
+);
+
+app.use((_req, res) => {
+  res.status(404).json({ error: "Rota bulunamadi" });
+});
+
+app.use((error, _req, res, _next) => {
+  console.error("[api]", error);
+  if (error?.code === "23505") {
+    return res.status(409).json({ error: "Kayit zaten mevcut" });
+  }
+  if (error?.code === "22P02") {
+    return res.status(400).json({ error: "Gecersiz parametre" });
+  }
+  return res.status(500).json({ error: "Sunucu hatasi", detail: error?.message || "Bilinmeyen hata" });
+});
+
+app.listen(PORT, () => {
+  console.log(`Backend sunucusu http://localhost:${PORT} adresinde calisiyor.`);
+  if (!process.env.GOOGLE_BOOKS_API_KEY?.trim()) {
+    console.warn("[kapak] GOOGLE_BOOKS_API_KEY yok, otomatik kapak endpointi bos donebilir.");
+  }
+});
