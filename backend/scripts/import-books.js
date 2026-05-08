@@ -9,7 +9,7 @@ const { Pool } = require("pg");
 // .env dosyasını bir üst dizinde arar
 dotenv.config({ path: path.join(__dirname, "..", ".env") });
 
-// 1. CSV başlıkları ile Veritabanı sütunlarını eşleştiriyoruz
+// 1. CSV başlıkları ile Veritabanı sütunlarını eşleştiriyoruz (aciklama eklendi)
 const FIELD_KEYS = {
   isbn: ["isbn", "isbn13", "isbn_13"],
   title: ["kitap_adi", "title"],
@@ -22,17 +22,18 @@ const FIELD_KEYS = {
   available: ["mevcut_adet"],
   shelf: ["raf_konumu"],
   status: ["durum"],
-  regDate: ["kayit_tarihi"]
+  regDate: ["kayit_tarihi"],
+  description: ["aciklama", "ozet", "description", "desc"] // YENİ EKLENDİ
 };
 
-// 2. SQL Sorgusu: id (UUID) otomatik oluşacağı için buraya eklemiyoruz.
+// 2. SQL Sorgusu (aciklama eklendi)
 const UPSERT_SQL = `
 INSERT INTO kitaplar (
   kitap_adi, yazar, kategoriler, isbn, sayfa_sayisi, 
   yayinevi, stok_adedi, basim_yili, mevcut_adet, 
-  raf_konumu, durum, kayit_tarihi
+  raf_konumu, durum, kayit_tarihi, aciklama
 ) VALUES (
-  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+  $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
 )
 ON CONFLICT (isbn) DO UPDATE SET
   kitap_adi = EXCLUDED.kitap_adi,
@@ -45,7 +46,8 @@ ON CONFLICT (isbn) DO UPDATE SET
   mevcut_adet = EXCLUDED.mevcut_adet,
   raf_konumu = EXCLUDED.raf_konumu,
   durum = EXCLUDED.durum,
-  kayit_tarihi = EXCLUDED.kayit_tarihi
+  kayit_tarihi = EXCLUDED.kayit_tarihi,
+  aciklama = EXCLUDED.aciklama
 RETURNING (xmax = 0) AS inserted;
 `;
 
@@ -109,7 +111,8 @@ function mapBook(record, row) {
     mevcut_adet: Math.max(0, (toInt(pick(record, FIELD_KEYS.available)) || 0)),
     raf_konumu: pick(record, FIELD_KEYS.shelf) || "Bilinmiyor",
     durum: pick(record, FIELD_KEYS.status) || "Mevcut",
-    kayit_tarihi: pick(record, FIELD_KEYS.regDate)
+    kayit_tarihi: pick(record, FIELD_KEYS.regDate),
+    aciklama: pick(record, FIELD_KEYS.description) || null // YENİ EKLENDİ
   };
 }
 
@@ -136,10 +139,11 @@ async function main() {
 
   try {
     for (const b of books) {
+      // 13. Parametre olarak b.aciklama eklendi
       const res = await pool.query(UPSERT_SQL, [
         b.kitap_adi, b.yazar, b.kategoriler, b.isbn, b.sayfa_sayisi,
         b.yayinevi, b.stok_adedi, b.basim_yili, b.mevcut_adet,
-        b.raf_konumu, b.durum, b.kayit_tarihi
+        b.raf_konumu, b.durum, b.kayit_tarihi, b.aciklama
       ]);
       if (res.rows[0]?.inserted) inserted++; else updated++;
     }

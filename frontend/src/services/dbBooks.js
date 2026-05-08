@@ -330,7 +330,7 @@ const formatBookData = (b, i) => {
       authors: [authorStr],
       publisher: b.yayinevi,
       publishedDate: b.basim_yili ? String(b.basim_yili) : b.yayin_tarihi,
-      description: b.kitap_aciklamasi || "",
+      description: description, // BURASI DÜZELTİLDİ: Artık aciklama sütununu okuyor
       pageCount: b.sayfa_sayisi,
       categories,
       imageLinks: {
@@ -360,7 +360,7 @@ export const searchLocalBooks = async (query) => {
 };
 
 export const getLocalBookById = async (id) => {
-  // Artık ID parametresi UUID (örn: 550e8400...) bekliyor
+  // BURASI DÜZELTİLDİ: Backend artık UUID değil, ISBN bekliyor.
   const response = await fetch(apiUrl(`/api/kitaplar/${encodeURIComponent(id)}`));
   const data = await parseJsonResponse(response);
   return formatBookData(data, 0);
