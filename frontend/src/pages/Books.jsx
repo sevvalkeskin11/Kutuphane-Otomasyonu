@@ -7,15 +7,16 @@ import HorizontalBookRow from "../components/HorizontalBookRow";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
 
-const CATALOG_SECTIONS = [
-  { title: "Biyografi", keywords: ["biyografi", "yaşam öyküsü"] },
-  { title: "Çocuk", keywords: ["çocuk"] },
-  { title: "Polisiye", keywords: ["polisiye", "gerilim"] },
-  { title: "Roman", keywords: ["roman"] },
-  { title: "Fantastik", keywords: ["fantastik", "fantezi"] },
-  { title: "Bilim kurgu", keywords: ["bilim kurgu", "science fiction"] },
-  { title: "Tarih", keywords: ["tarih"] },
-  { title: "Kişisel gelişim", keywords: ["kişisel", "gelişim"] },
+// Backend /api/kategoriler erişilemediğinde gösterilecek emniyetli liste.
+const FALLBACK_CATEGORIES = [
+  "Roman",
+  "Çocuk",
+  "Polisiye",
+  "Fantastik",
+  "Bilim kurgu",
+  "Tarih",
+  "Türk klasiği",
+  "Dünya klasiği",
 ];
 
 function normalizeCatalogQuery(q) {
@@ -52,21 +53,29 @@ function catalogBookMatches(book, q, cat, author) {
   return true;
 }
 
-// 2. Kategori bölümlerini (Roman, Tarih vb.) kendi sütunlarımıza göre ayırdık
-function booksForSection(all, keywords, sectionIndex) {
-  const lower = keywords.map((k) => k.toLowerCase());
-  const picked = all.filter((book) => {
-    const cats = (book.kategoriler || "").toLowerCase();
-    const title = (book.kitap_adi || "").toLowerCase();
-    const blob = `${cats} ${title}`;
-    return lower.some((kw) => blob.includes(kw));
-  });
-  if (picked.length >= 3) return picked.slice(0, 12);
-  const n = all.length;
-  if (!n) return [];
-  const start = (sectionIndex * 11) % n;
-  const rotated = [...all.slice(start), ...all.slice(0, start)];
-  return rotated.slice(0, 12);
+// Bir kategori ismini kök başlığına indirger: "Bilim kurgu/macera" → "Bilim kurgu"
+function extractRootCategory(categoryName) {
+  return String(categoryName || "").split("/")[0].trim();
+}
+
+// Bir kitabın `kategoriler` hücresinden tüm kök kategorileri çıkarır.
+// Örn. "Distopya/bilim kurgu, Roman/suç" → ["Distopya", "Roman"]
+function bookRootCategories(book) {
+  const raw = (book?.kategoriler || "").toString().trim();
+  if (!raw) return [];
+  return raw
+    .split(",")
+    .map((part) => extractRootCategory(part).toLowerCase())
+    .filter(Boolean);
+}
+
+// Verilen kök kategoriye ait kitapları döndürür.
+function booksForRoot(all, rootName, limit = 12) {
+  const target = rootName.trim().toLowerCase();
+  if (!target) return [];
+  return all
+    .filter((book) => bookRootCategories(book).includes(target))
+    .slice(0, limit);
 }
 
 export default function Books() {
@@ -149,13 +158,33 @@ export default function Books() {
     [allBooks, query, category, authorFilter],
   );
 
-  const sectionBooksMap = useMemo(() => {
-    const m = {};
-    CATALOG_SECTIONS.forEach((s, idx) => {
-      m[s.title] = booksForSection(allBooks, s.keywords, idx);
-    });
-    return m;
-  }, [allBooks]);
+  // Kök kategori şeritleri: 52 alt kategoriyi "/" ile bölüp ana türlere indirgiyoruz.
+  // ("Bilim kurgu/macera" → "Bilim kurgu", "Çocuk/felsefe" → "Çocuk", vb.)
+  const categorySections = useMemo(() => {
+    const source = serverCategories.length > 0 ? serverCategories : FALLBACK_CATEGORIES;
+
+    // Tüm kök isimleri tekilleştir, ekran adını korumak için ilk gördüğümüz biçimi al.
+    const seen = new Map(); // lowercase → display
+    for (const item of source) {
+      const root = extractRootCategory(item);
+      if (!root) continue;
+      const lc = root.toLowerCase();
+      if (!seen.has(lc)) seen.set(lc, root);
+    }
+
+    // Veride yoksa kategoriler listesinde olmayıp ama kitaplarda var olan kökler de görünsün
+    for (const book of allBooks) {
+      for (const lc of bookRootCategories(book)) {
+        if (!seen.has(lc)) seen.set(lc, lc.charAt(0).toUpperCase() + lc.slice(1));
+      }
+    }
+
+    const sorted = [...seen.values()].sort((a, b) => a.localeCompare(b, "tr"));
+
+    return sorted
+      .map((name) => ({ name, books: booksForRoot(allBooks, name, 12) }))
+      .filter((s) => s.books.length > 0);
+  }, [serverCategories, allBooks]);
 
   // 4. Kategori seçenekleri:
   //    1) Backend /api/kategoriler dönerse onu kullan (tek kaynak).
@@ -371,41 +400,40 @@ export default function Books() {
         </div>
       )}
 
-      {/* Sonuç bölümü her zaman üstte; filtre etkinse hemen burada gözükür. */}
-      <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-5 shadow-lg md:p-6">
-        {!loading && !error && (
-          <div className="mb-4 flex items-end justify-between">
-            <h2 className="text-lg font-bold text-ink">
-              {activeFilters.length > 0 ? "Arama sonuçları" : "Tüm kitaplar"}
-            </h2>
-            <span className="text-sm font-medium text-ink/55">
-              {filteredBooks.length} sonuç
-            </span>
-          </div>
-        )}
-        {error && (
-          <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-            {error}
-          </div>
-        )}
-        {loading ? (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {Array.from({ length: 10 }).map((_, i) => (
-              <div
-                key={i}
-                className="aspect-[2/3] animate-pulse rounded-2xl bg-slate-100"
-              />
-            ))}
-          </div>
-        ) : filteredBooks.length === 0 ? (
-          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-ink/15 bg-white px-6 py-12 text-center">
-            <p className="text-base font-semibold text-ink">
-              Aramanıza uygun kitap bulunamadı
-            </p>
-            <p className="mt-1 max-w-md text-sm text-ink/55">
-              Farklı bir kelime deneyin veya filtreleri temizleyin.
-            </p>
-            {activeFilters.length > 0 && (
+      {error && (
+        <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </div>
+      )}
+
+      {/* Filtre/arama varken: arama sonuçları grid'i */}
+      {activeFilters.length > 0 && (
+        <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-5 shadow-lg md:p-6">
+          {!loading && !error && (
+            <div className="mb-4 flex items-end justify-between">
+              <h2 className="text-lg font-bold text-ink">Arama sonuçları</h2>
+              <span className="text-sm font-medium text-ink/55">
+                {filteredBooks.length} sonuç
+              </span>
+            </div>
+          )}
+          {loading ? (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {Array.from({ length: 10 }).map((_, i) => (
+                <div
+                  key={i}
+                  className="aspect-[2/3] animate-pulse rounded-2xl bg-slate-100"
+                />
+              ))}
+            </div>
+          ) : filteredBooks.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-ink/15 bg-white px-6 py-12 text-center">
+              <p className="text-base font-semibold text-ink">
+                Aramanıza uygun kitap bulunamadı
+              </p>
+              <p className="mt-1 max-w-md text-sm text-ink/55">
+                Farklı bir kelime deneyin veya filtreleri temizleyin.
+              </p>
               <Button
                 variant="secondary"
                 className="mt-4"
@@ -413,45 +441,59 @@ export default function Books() {
               >
                 Filtreleri temizle
               </Button>
-            )}
-          </div>
-        ) : (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {gridBooks.map((b, i) => (
-              <BookCard key={bookListKey(b, i)} book={b} />
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+              {gridBooks.map((b, i) => (
+                <BookCard key={bookListKey(b, i)} book={b} />
+              ))}
+            </div>
+          )}
+          {!loading && !error && hasMore && (
+            <div className="mt-6 flex justify-center">
+              <Button
+                variant="secondary"
+                onClick={() => setVisibleCount((n) => n + 20)}
+              >
+                Daha fazla göster
+              </Button>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Filtre yokken: tüm kategoriler iki sütun hizada */}
+      {activeFilters.length === 0 && (
+        <>
+          {!loading && categorySections.length > 0 && (
+            <div className="mb-4 flex items-end justify-between">
+              <h2 className="text-lg font-bold text-ink">Kategoriler</h2>
+              <span className="text-sm text-ink/55">
+                {categorySections.length} kategori · {allBooks.length} kitap
+              </span>
+            </div>
+          )}
+          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 md:gap-6">
+            {categorySections.map((s, idx) => (
+              <HorizontalBookRow
+                key={s.name}
+                title={s.name}
+                books={s.books}
+                loading={loading}
+                error=""
+                variant="scroll"
+                reverse={idx % 2 === 1}
+                actionTo={`/katalog?category=${encodeURIComponent(s.name)}`}
+                className="mb-0"
+              />
             ))}
           </div>
-        )}
-        {!loading && !error && hasMore && (
-          <div className="mt-6 flex justify-center">
-            <Button
-              variant="secondary"
-              onClick={() => setVisibleCount((n) => n + 20)}
-            >
-              Daha fazla göster
-            </Button>
-          </div>
-        )}
-      </section>
-
-      {/* Kategori şeritleri yalnızca filtre yokken gösterilir,
-          böylece arama sonucu sayfanın çok aşağısına itilmez. */}
-      {activeFilters.length === 0 && (
-        <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
-          {CATALOG_SECTIONS.map((s, idx) => (
-            <HorizontalBookRow
-              key={s.title}
-              title={s.title}
-              books={sectionBooksMap[s.title] || []}
-              loading={loading}
-              error=""
-              variant="scroll"
-              reverse={idx % 2 === 1}
-              actionTo={`/katalog?q=${encodeURIComponent(s.keywords[0])}`}
-              className="mb-0"
-            />
-          ))}
-        </div>
+          {!loading && categorySections.length === 0 && (
+            <div className="rounded-2xl border border-dashed border-ink/15 bg-white p-8 text-center text-sm text-ink/55">
+              Henüz kategorize edilmiş kitap yok.
+            </div>
+          )}
+        </>
       )}
     </div>
   );
