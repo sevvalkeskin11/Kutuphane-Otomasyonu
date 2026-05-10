@@ -2,21 +2,53 @@ import { motion, useReducedMotion } from 'framer-motion'
 import { Link } from 'react-router-dom'
 import SmartBookCover from './SmartBookCover'
 
+function firstTopicLabel(raw) {
+  if (!raw || typeof raw !== 'string') return ''
+  const t = raw.trim()
+  if (!t) return ''
+  const part = t.split(/[,;/|]/)[0]
+  return (part || t).trim()
+}
+
+/** Liste anahtarı: DB satırlarında `isbn`, Google’dan gelen kartlarda `id` / `volumeId` */
+export function bookListKey(book, fallbackIndex = 0) {
+  const k = book?.isbn ?? book?.id ?? book?.volumeId
+  if (k != null && String(k).trim() !== '') return String(k)
+  return `book-${fallbackIndex}`
+}
+
+/** PostgreSQL (/api/kitaplar) ve Google Books çıktısını tek kartta kullanmak için */
 export default function BookCard({ book, compact = false, decorative = false }) {
-  // 1. Konsoldan gelen JSON'a göre değişkenleri tam eşleştiriyoruz:
-  const title = book.title || 'İsimsiz Kitap'
-  const author = book.authors?.[0] || 'Bilinmeyen Yazar'
-  const category = book.volumeInfo?.categories?.[0] || 'Genel'
-  
-  // Resim için önce Google Books linkini (thumbnail), yoksa OpenLibrary yedek linkini kullanıyoruz
-  const coverUrl = book.thumbnail || book.coverFallbackUrl || '/placeholder-book.jpg'
+  const title =
+    (book.kitap_adi && String(book.kitap_adi).trim()) ||
+    book.title ||
+    'İsimsiz Kitap'
+
+  const authorFromDb = book.yazar && String(book.yazar).trim()
+  const authorFromApi = Array.isArray(book.authors) ? book.authors[0] : book.authors
+  const author = (authorFromDb || authorFromApi || '').trim() || 'Bilinmeyen Yazar'
+
+  const category =
+    firstTopicLabel(book.kategoriler || book.ilgili_kategoriler) ||
+    book.volumeInfo?.categories?.[0] ||
+    'Genel'
+
+  const coverUrl =
+    (book.kapak_url && String(book.kapak_url).trim()) ||
+    book.thumbnail ||
+    book.volumeInfo?.imageLinks?.thumbnail ||
+    book.coverFallbackUrl ||
+    '/placeholder-book.jpg'
+
+  const isbn = book.isbn != null && String(book.isbn).trim() !== '' ? String(book.isbn) : ''
+  const detailTo = isbn ? `/kitap/${encodeURIComponent(isbn)}` : '/katalog'
   
   const reduce = useReducedMotion()
-  const w = compact ? 'w-[140px] sm:w-[150px]' : 'w-full min-w-[150px] sm:min-w-[160px]'
+  const w = compact ? 'w-[130px] sm:w-[140px]' : 'w-[140px] sm:w-[150px]'
 
   return (
     <Link
-      to={`/kitap/${book.isbn}`}
+      to={detailTo}
       tabIndex={decorative ? -1 : undefined}
       aria-hidden={decorative ? true : undefined}
       className={`group block flex-shrink-0 ${w} rounded-card focus:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2`}
@@ -48,11 +80,11 @@ export default function BookCard({ book, compact = false, decorative = false }) 
             {category}
           </span>
         </div>
-        <div className="p-3.5">
-          <h3 className="line-clamp-2 text-sm font-semibold leading-snug text-slate-900">
+        <div className="p-2.5">
+          <h3 className="line-clamp-2 text-[13px] font-semibold leading-snug text-slate-900">
             {title}
           </h3>
-          <p className="mt-1 line-clamp-1 text-xs text-slate-500">
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-slate-500">
             {author}
           </p>
         </div>

@@ -1,7 +1,7 @@
-export const apiUrl = (path) => {
-  const base = (import.meta.env.VITE_API_BASE_URL || "").replace(/\/$/, "");
-  return base ? `${base}${path}` : path;
-};
+import { apiUrl } from "./apiUrl.js";
+import { apiFetch } from "./apiFetch.js";
+
+export { apiUrl };
 
 async function parseJsonResponse(response) {
   const text = await response.text();
@@ -343,7 +343,7 @@ const formatBookData = (b, i) => {
 
 export const fetchLocalBooks = async (limit = 200) => {
   const n = Math.min(Math.max(Number(limit) || 200, 1), 200);
-  const response = await fetch(apiUrl(`/api/kitaplar?limit=${encodeURIComponent(String(n))}`));
+  const response = await apiFetch(`/api/kitaplar?limit=${encodeURIComponent(String(n))}`);
   const data = await parseJsonResponse(response);
   if (!Array.isArray(data)) throw new Error("Kitap listesi alınamadı");
   return data.map((b, i) => formatBookData(b, i));
@@ -351,8 +351,8 @@ export const fetchLocalBooks = async (limit = 200) => {
 
 export const searchLocalBooks = async (query) => {
   if (!query) return [];
-  const response = await fetch(
-    apiUrl(`/api/kitaplar/ara?q=${encodeURIComponent(query)}`),
+  const response = await apiFetch(
+    `/api/kitaplar/ara?q=${encodeURIComponent(query)}`,
   );
   const data = await parseJsonResponse(response);
   if (!Array.isArray(data)) throw new Error("Arama sonucu alınamadı");
@@ -361,7 +361,7 @@ export const searchLocalBooks = async (query) => {
 
 export const getLocalBookById = async (id) => {
   // BURASI DÜZELTİLDİ: Backend artık UUID değil, ISBN bekliyor.
-  const response = await fetch(apiUrl(`/api/kitaplar/${encodeURIComponent(id)}`));
+  const response = await apiFetch(`/api/kitaplar/${encodeURIComponent(id)}`);
   const data = await parseJsonResponse(response);
   return formatBookData(data, 0);
 };

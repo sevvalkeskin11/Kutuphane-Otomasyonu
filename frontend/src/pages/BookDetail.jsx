@@ -1,21 +1,30 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
+import { SIMILAR_BOOKS_POOL_LIMIT } from "../config/perfTuning";
 import HorizontalBookRow from "../components/HorizontalBookRow";
 import SmartBookCover from "../components/SmartBookCover";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import { apiUrl } from "../services/dbBooks";
+import { apiFetch } from "../services/apiFetch";
+import { useAuth } from "../context/AuthContext";
 
 export default function BookDetail() {
   const { id } = useParams(); // URL'den gelen ISBN (BookCard'ı güncellediğimiz için buraya isbn gelecek)
+  const { token, isAuthenticated } = useAuth();
   const [book, setBook] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [expandedDescription, setExpandedDescription] = useState(false);
   const [similarBooks, setSimilarBooks] = useState([]);
-  
+
   // Stok durumunu tutmak için
   const [stock, setStock] = useState({ inStock: false, copies: 0 });
+
+  // Favori durumu (sadece giriş yapmış kullanıcılar için anlamlı)
+  const [isFavorite, setIsFavorite] = useState(false);
+  const [favoriteBusy, setFavoriteBusy] = useState(false);
 
   // 1. KİTAP BİLGİLERİNİ GERÇEK BACKEND'DEN ÇEK
   useEffect(() => {
@@ -24,7 +33,7 @@ export default function BookDetail() {
     setError("");
     setNotice("");
 
-    fetch(`http://localhost:5050/api/kitaplar/${id}`)
+    fetch(apiUrl(`/api/kitaplar/${encodeURIComponent(id)}`))
       .then((res) => {
         if (!res.ok) throw new Error("Kitap bulunamadı.");
         return res.json();
@@ -54,23 +63,20 @@ export default function BookDetail() {
   // 2. GERÇEK ÖDÜNÇ ALMA İŞLEMİ (TOKEN İLE)
   async function handleBorrow() {
     setNotice("");
-    const token = localStorage.getItem("token");
 
     // Kullanıcı giriş yapmamışsa uyar
-    if (!token) {
+    if (!isAuthenticated || !token) {
       setNotice("❌ Ödünç almak için önce giriş yapmalısınız.");
       return;
     }
 
     try {
-      const response = await fetch("http://localhost:5050/api/odunc", {
+      const response = await apiFetch("/api/odunc", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          "Authorization": `Bearer ${token}` // Backend'e yetki kartımızı gösteriyoruz
         },
-        // Backend'imiz kitapIsbn parametresi bekliyor
-        body: JSON.stringify({ kitapIsbn: book.isbn }) 
+        body: JSON.stringify({ kitapIsbn: book.isbn }),
       });
 
       const data = await response.json();
@@ -88,12 +94,75 @@ export default function BookDetail() {
     }
   }
 
-  // 3. BENZER KİTAPLARI KENDİ VERİTABANIMIZDAN GETİR
+  // 3. KİTAP FAVORİDE Mİ? (Sadece giriş yapmış kullanıcı için)
+  useEffect(() => {
+    if (!isAuthenticated || !book?.isbn) {
+      setIsFavorite(false);
+      return;
+    }
+    let cancelled = false;
+    apiFetch("/api/favoriler")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((favs) => {
+        if (cancelled || !Array.isArray(favs)) return;
+        setIsFavorite(favs.some((f) => f.isbn === book.isbn));
+      })
+      .catch(() => {
+        /* sessizce geç: kalp boş kalır */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isAuthenticated, book?.isbn]);
+
+  // Favori ekle/kaldır
+  async function toggleFavorite() {
+    setNotice("");
+    if (!isAuthenticated || !token) {
+      setNotice("❌ Favorilere eklemek için önce giriş yapmalısınız.");
+      return;
+    }
+    if (!book?.isbn || favoriteBusy) return;
+
+    setFavoriteBusy(true);
+    const wasFavorite = isFavorite;
+    // Optimistik güncelleme: kullanıcıya anında geri bildirim
+    setIsFavorite(!wasFavorite);
+
+    try {
+      const res = wasFavorite
+        ? await apiFetch(`/api/favoriler/${encodeURIComponent(book.isbn)}`, {
+            method: "DELETE",
+          })
+        : await apiFetch("/api/favoriler", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ kitapIsbn: book.isbn }),
+          });
+
+      if (!res.ok && res.status !== 409) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error || "Favori işlemi başarısız oldu.");
+      }
+      // 409 (zaten favoride) → optimistik güncelleme zaten doğru
+    } catch (err) {
+      setIsFavorite(wasFavorite); // geri al
+      setNotice(`❌ ${err.message}`);
+    } finally {
+      setFavoriteBusy(false);
+    }
+  }
+
+  // 4. BENZER KİTAPLARI KENDİ VERİTABANIMIZDAN GETİR
   useEffect(() => {
     if (!book) return;
     let cancelled = false;
 
-    fetch("http://localhost:5050/api/kitaplar?limit=100")
+    fetch(
+      apiUrl(
+        `/api/kitaplar?limit=${encodeURIComponent(String(SIMILAR_BOOKS_POOL_LIMIT))}`,
+      ),
+    )
       .then((res) => res.json())
       .then((items) => {
         if (cancelled) return;
@@ -228,10 +297,43 @@ export default function BookDetail() {
             </Button>
           )}
 
-          <div className="mt-8 flex flex-wrap gap-3">
+          <div className="mt-8 flex flex-wrap items-center gap-3">
             <Button disabled={!stock.inStock} onClick={handleBorrow} size="lg">
               Ödünç al
             </Button>
+            <button
+              type="button"
+              onClick={toggleFavorite}
+              disabled={favoriteBusy}
+              aria-pressed={isFavorite}
+              aria-label={isFavorite ? "Favorilerden çıkar" : "Favorilere ekle"}
+              title={
+                isAuthenticated
+                  ? isFavorite
+                    ? "Favorilerden çıkar"
+                    : "Favorilere ekle"
+                  : "Favorilere eklemek için giriş yapın"
+              }
+              className={`group inline-flex h-12 items-center gap-2 rounded-full border px-5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-60 ${
+                isFavorite
+                  ? "border-rose-300 bg-rose-50 text-rose-600 hover:bg-rose-100"
+                  : "border-ink/15 bg-white text-ink/75 hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600"
+              }`}
+            >
+              <svg
+                viewBox="0 0 24 24"
+                className="h-5 w-5"
+                aria-hidden
+                fill={isFavorite ? "currentColor" : "none"}
+                stroke="currentColor"
+                strokeWidth="1.8"
+                strokeLinejoin="round"
+                strokeLinecap="round"
+              >
+                <path d="M12 21s-7-4.35-7-10a4 4 0 017-2.65A4 4 0 0119 11c0 5.65-7 10-7 10z" />
+              </svg>
+              <span>{isFavorite ? "Favoride" : "Favorilere ekle"}</span>
+            </button>
           </div>
           
           {/* Uyarı ve Başarı Mesajları Buraya Gelecek */}

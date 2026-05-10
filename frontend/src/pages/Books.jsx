@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import BookCard from "../components/BookCard";
+import { CATALOG_BOOKS_FETCH_LIMIT } from "../config/perfTuning";
+import { apiFetch } from "../services/apiFetch";
+import BookCard, { bookListKey } from "../components/BookCard";
 import HorizontalBookRow from "../components/HorizontalBookRow";
 import Button from "../components/ui/Button";
 import Input from "../components/ui/Input";
@@ -14,15 +16,6 @@ const CATALOG_SECTIONS = [
   { title: "Bilim kurgu", keywords: ["bilim kurgu", "science fiction"] },
   { title: "Tarih", keywords: ["tarih"] },
   { title: "Kişisel gelişim", keywords: ["kişisel", "gelişim"] },
-];
-
-const DEFAULT_CATEGORY_OPTIONS = [
-  "Biyografi",
-  "Çocuk",
-  "Polisiye",
-  "Roman",
-  "Fantastik",
-  "Bilim kurgu",
 ];
 
 function normalizeCatalogQuery(q) {
@@ -86,6 +79,7 @@ export default function Books() {
     searchParams.get("author") || "",
   );
   const [allBooks, setAllBooks] = useState([]);
+  const [serverCategories, setServerCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [visibleCount, setVisibleCount] = useState(40);
@@ -104,7 +98,9 @@ export default function Books() {
     setLoading(true);
     setError("");
     
-    fetch("http://localhost:5050/api/kitaplar?limit=200")
+    apiFetch(
+      `/api/kitaplar?limit=${encodeURIComponent(String(CATALOG_BOOKS_FETCH_LIMIT))}`,
+    )
       .then((res) => {
         if (!res.ok) throw new Error("Sunucudan veri alınamadı");
         return res.json();
@@ -128,6 +124,23 @@ export default function Books() {
     };
   }, []);
 
+  // Kategori listesini backend'den çek (GET /api/kategoriler).
+  // Backend hata verirse useMemo'daki kitap-türetimli liste fallback olur.
+  useEffect(() => {
+    let cancelled = false;
+    apiFetch("/api/kategoriler")
+      .then((res) => (res.ok ? res.json() : []))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data)) setServerCategories(data);
+      })
+      .catch(() => {
+        /* sessizce yut: fallback devreye girer */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const filteredBooks = useMemo(
     () =>
       allBooks.filter((b) =>
@@ -144,19 +157,23 @@ export default function Books() {
     return m;
   }, [allBooks]);
 
-  // 4. Kategori seçeneklerini senin veritabanındaki verilere göre çeker
+  // 4. Kategori seçenekleri:
+  //    1) Backend /api/kategoriler dönerse onu kullan (tek kaynak).
+  //    2) Henüz dönmediyse / boşsa, yüklenen kitap satırlarından türet.
   const categoryOptions = useMemo(() => {
+    if (serverCategories.length > 0) return serverCategories;
     const set = new Set();
-    DEFAULT_CATEGORY_OPTIONS.forEach((cat) => set.add(cat));
     allBooks.forEach((book) => {
       const cat = book.kategoriler;
-      if (cat) {
-        const trimmed = String(cat).trim();
-        if (trimmed) set.add(trimmed);
-      }
+      if (!cat) return;
+      String(cat)
+        .split(",")
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((part) => set.add(part));
     });
     return [...set].sort((a, b) => a.localeCompare(b, "tr"));
-  }, [allBooks]);
+  }, [serverCategories, allBooks]);
 
   // 5. Arama yaparken çıkan hızlı önerileri (dropdown) kendi verimize göre ayarladık
   const quickSuggestions = useMemo(() => {
@@ -335,7 +352,7 @@ export default function Books() {
       </section>
 
       {activeFilters.length > 0 && (
-        <div className="mb-6 flex flex-wrap gap-2">
+        <div className="mb-6 flex flex-wrap items-center gap-2">
           {activeFilters.map((item) => (
             <span
               key={item}
@@ -344,26 +361,28 @@ export default function Books() {
               {item}
             </span>
           ))}
+          <button
+            type="button"
+            onClick={clearFilters}
+            className="ml-1 rounded-full border border-ink/10 bg-white px-3 py-1 text-xs font-semibold text-ink/70 transition hover:bg-ink/[0.04]"
+          >
+            Filtreleri temizle
+          </button>
         </div>
       )}
 
-      <div className="mb-10 grid grid-cols-1 gap-6 md:grid-cols-2">
-        {CATALOG_SECTIONS.map((s, idx) => (
-          <HorizontalBookRow
-            key={s.title}
-            title={s.title}
-            books={sectionBooksMap[s.title] || []}
-            loading={loading}
-            error=""
-            variant="scroll"
-            reverse={idx % 2 === 1}
-            actionTo={`/katalog?q=${encodeURIComponent(s.keywords[0])}`}
-            className="mb-0"
-          />
-        ))}
-      </div>
-
+      {/* Sonuç bölümü her zaman üstte; filtre etkinse hemen burada gözükür. */}
       <section className="rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/40 p-5 shadow-lg md:p-6">
+        {!loading && !error && (
+          <div className="mb-4 flex items-end justify-between">
+            <h2 className="text-lg font-bold text-ink">
+              {activeFilters.length > 0 ? "Arama sonuçları" : "Tüm kitaplar"}
+            </h2>
+            <span className="text-sm font-medium text-ink/55">
+              {filteredBooks.length} sonuç
+            </span>
+          </div>
+        )}
         {error && (
           <div className="mb-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
             {error}
@@ -378,10 +397,28 @@ export default function Books() {
               />
             ))}
           </div>
+        ) : filteredBooks.length === 0 ? (
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-ink/15 bg-white px-6 py-12 text-center">
+            <p className="text-base font-semibold text-ink">
+              Aramanıza uygun kitap bulunamadı
+            </p>
+            <p className="mt-1 max-w-md text-sm text-ink/55">
+              Farklı bir kelime deneyin veya filtreleri temizleyin.
+            </p>
+            {activeFilters.length > 0 && (
+              <Button
+                variant="secondary"
+                className="mt-4"
+                onClick={clearFilters}
+              >
+                Filtreleri temizle
+              </Button>
+            )}
+          </div>
         ) : (
           <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
-            {gridBooks.map((b) => (
-              <BookCard key={b.id} book={b} />
+            {gridBooks.map((b, i) => (
+              <BookCard key={bookListKey(b, i)} book={b} />
             ))}
           </div>
         )}
@@ -396,6 +433,26 @@ export default function Books() {
           </div>
         )}
       </section>
+
+      {/* Kategori şeritleri yalnızca filtre yokken gösterilir,
+          böylece arama sonucu sayfanın çok aşağısına itilmez. */}
+      {activeFilters.length === 0 && (
+        <div className="mt-10 grid grid-cols-1 gap-6 md:grid-cols-2">
+          {CATALOG_SECTIONS.map((s, idx) => (
+            <HorizontalBookRow
+              key={s.title}
+              title={s.title}
+              books={sectionBooksMap[s.title] || []}
+              loading={loading}
+              error=""
+              variant="scroll"
+              reverse={idx % 2 === 1}
+              actionTo={`/katalog?q=${encodeURIComponent(s.keywords[0])}`}
+              className="mb-0"
+            />
+          ))}
+        </div>
+      )}
     </div>
   );
 }

@@ -11,7 +11,9 @@ const { sniffImageMime } = require("./scripts/sniffImageMime");
 
 const PORT = Number(process.env.PORT) || 5050;
 const DEFAULT_BORROW_DAYS = Number.parseInt(process.env.DEFAULT_BORROW_DAYS || "14", 10) || 14;
-const TOKEN_EXPIRES_HOURS = Number.parseInt(process.env.TOKEN_EXPIRES_HOURS || "168", 10) || 168;
+// Paylaşımlı / açık unutulan cihazlarda uzun ömürlü JWT riski: varsayılan 24 saat.
+// İsterseniz .env ile TOKEN_EXPIRES_HOURS=8 gibi daha kısa verin.
+const TOKEN_EXPIRES_HOURS = Number.parseInt(process.env.TOKEN_EXPIRES_HOURS || "24", 10) || 24;
 const AUTH_SECRET = String(process.env.AUTH_SECRET || "").trim() || "dev-only-change-this-secret";
 const ALLOW_GUEST_BORROW = process.env.ALLOW_GUEST_BORROW !== "false";
 
@@ -1388,6 +1390,102 @@ app.get(
     );
 
     return res.json(result.rows);
+  })
+);
+
+// KULLANICININ KENDİ ÖDÜNCÜNÜ İADE ETMESİ
+// Admin'in /api/admin/transactions/:id/return endpoint'inin user-scoped
+// versiyonu: yalnızca işlem giriş yapan kullanıcıya aitse iade eder.
+app.post(
+  "/api/profil/iade/:id",
+  authRequired,
+  asyncHandler(async (req, res) => {
+    const userId = req.auth.sub;
+    const id = parsePositiveInt(req.params.id, NaN, 1);
+    if (!Number.isFinite(id)) {
+      return res.status(400).json({ error: "Gecersiz islem id" });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+
+      const loanResult = await client.query(
+        `
+          SELECT id, user_id, kitap_isbn, borrow_date, due_date, return_date, status
+          FROM odunc_islemleri
+          WHERE id = $1
+          FOR UPDATE
+        `,
+        [id]
+      );
+
+      if (!loanResult.rows.length) {
+        await client.query("ROLLBACK");
+        return res.status(404).json({ error: "Odunc islemi bulunamadi" });
+      }
+
+      const loan = loanResult.rows[0];
+
+      // Sadece kendi ödüncünü iade edebilir
+      if (String(loan.user_id) !== String(userId)) {
+        await client.query("ROLLBACK");
+        return res.status(403).json({ error: "Bu islemi iade etme yetkiniz yok" });
+      }
+
+      if (loan.return_date || loan.status === "iade_edildi") {
+        await client.query("COMMIT");
+        return res.json({
+          message: "Bu kitap zaten iade edilmis.",
+          transaction: {
+            id: String(loan.id),
+            bookIsbn: loan.kitap_isbn,
+            borrowDate: asIsoDate(loan.borrow_date),
+            dueDate: asIsoDate(loan.due_date),
+            returnDate: asIsoDate(loan.return_date),
+            status: "returned",
+          },
+        });
+      }
+
+      const updatedLoan = await client.query(
+        `
+          UPDATE odunc_islemleri
+          SET return_date = CURRENT_DATE, status = 'iade_edildi'
+          WHERE id = $1
+          RETURNING id, kitap_isbn, borrow_date, due_date, return_date, status
+        `,
+        [id]
+      );
+
+      await client.query(
+        `
+          UPDATE kitaplar
+          SET stok_adedi = COALESCE(stok_adedi, 0) + 1
+          WHERE isbn = $1
+        `,
+        [loan.kitap_isbn]
+      );
+
+      await client.query("COMMIT");
+
+      return res.json({
+        message: "Kitap basariyla iade edildi.",
+        transaction: {
+          id: String(updatedLoan.rows[0].id),
+          bookIsbn: updatedLoan.rows[0].kitap_isbn,
+          borrowDate: asIsoDate(updatedLoan.rows[0].borrow_date),
+          dueDate: asIsoDate(updatedLoan.rows[0].due_date),
+          returnDate: asIsoDate(updatedLoan.rows[0].return_date),
+          status: "returned",
+        },
+      });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      throw err;
+    } finally {
+      client.release();
+    }
   })
 );
 

@@ -1,7 +1,7 @@
 import { motion, useReducedMotion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
-import BookCard from "./BookCard";
+import BookCard, { bookListKey } from "./BookCard";
 
 function MarqueeStrip({ books, reverse = false }) {
   const reduce = useReducedMotion();
@@ -9,9 +9,9 @@ function MarqueeStrip({ books, reverse = false }) {
 
   if (reduce) {
     return (
-      <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
-        {books.map((b) => (
-          <div key={b.id} className="snap-start">
+      <div className="-mx-3 flex snap-x snap-mandatory gap-4 overflow-x-auto px-3 pb-1 md:-mx-5 md:px-5">
+        {books.map((b, i) => (
+          <div key={bookListKey(b, i)} className="snap-start">
             <BookCard book={b} />
           </div>
         ))}
@@ -27,11 +27,11 @@ function MarqueeStrip({ books, reverse = false }) {
         animationDirection: reverse ? "reverse" : "normal",
       }}
     >
-      {books.map((b) => (
-        <BookCard key={b.id} book={b} />
+      {books.map((b, i) => (
+        <BookCard key={`${bookListKey(b, i)}-a`} book={b} />
       ))}
-      {books.map((b) => (
-        <BookCard key={`${b.id}-marquee`} book={b} decorative />
+      {books.map((b, i) => (
+        <BookCard key={`${bookListKey(b, i)}-b`} book={b} decorative />
       ))}
     </div>
   );
@@ -39,9 +39,9 @@ function MarqueeStrip({ books, reverse = false }) {
 
 function ScrollStrip({ books }) {
   return (
-    <div className="-mx-4 flex snap-x snap-mandatory gap-4 overflow-x-auto px-4 pb-2 md:-mx-6 md:px-6">
-      {books.map((b) => (
-        <div key={b.id} className="snap-start">
+    <div className="-mx-3 flex snap-x snap-mandatory gap-4 overflow-x-auto px-3 pb-1 md:-mx-5 md:px-5">
+      {books.map((b, i) => (
+        <div key={bookListKey(b, i)} className="snap-start">
           <BookCard book={b} />
         </div>
       ))}
@@ -74,7 +74,7 @@ export default function HorizontalBookRow({
 
   return (
     <motion.section
-      className={`mb-10 rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/70 p-4 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-xl md:mb-12 md:p-6 ${className}`}
+      className={`mb-5 rounded-3xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/70 p-3 shadow-md transition duration-300 hover:-translate-y-1 hover:shadow-xl last:mb-0 md:mb-7 md:p-5 ${className}`}
       initial={reduce ? false : { opacity: 0, y: 28 }}
       animate={
         reduce
@@ -87,13 +87,13 @@ export default function HorizontalBookRow({
       viewport={{ once: true, amount: 0.12, margin: "0px 0px -8% 0px" }}
       transition={{ duration: reduce ? 0 : 0.55, ease: [0.22, 1, 0.36, 1] }}
     >
-      <div className="mb-5 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200/80 pb-4">
+      <div className="mb-3 flex flex-wrap items-end justify-between gap-3 border-b border-slate-200/80 pb-3">
         <div>
-          <h2 className="text-xl font-bold tracking-tight text-ink md:text-[1.7rem]">
+          <h2 className="text-lg font-bold tracking-tight text-ink md:text-[1.4rem]">
             {title}
           </h2>
           {subtitle && (
-            <p className="mt-1 max-w-xl text-sm text-ink/55 md:text-[0.95rem]">
+            <p className="mt-0.5 max-w-xl text-xs text-ink/55 md:text-sm">
               {subtitle}
             </p>
           )}
@@ -121,28 +121,6 @@ export default function HorizontalBookRow({
             </svg>
           </Link>
         )}
-        {!loading && !error && books?.length > 0 && (
-          <span
-            className="hidden items-center gap-1 text-xs font-medium text-slate-500 sm:flex motion-reduce:animate-none animate-scroll-hint"
-            aria-hidden
-          >
-            Üzerine gelince durur · tıklayarak detay
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-              aria-hidden
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 5l7 7-7 7"
-              />
-            </svg>
-          </span>
-        )}
       </div>
       {!loading && !error && books?.length > 0 && (
         <p className="mb-3 flex items-center gap-1 text-xs text-ink/45 sm:hidden">
@@ -160,13 +138,13 @@ export default function HorizontalBookRow({
           {[1, 2, 3, 4, 5].map((i) => (
             <div
               key={i}
-              className="h-[280px] w-[160px] flex-shrink-0 animate-pulse rounded-card bg-white shadow-card"
+              className="h-[240px] w-[140px] flex-shrink-0 animate-pulse rounded-card bg-white shadow-card sm:w-[150px]"
             />
           ))}
         </div>
       )}
       {!loading && !error && (
-        <div className="relative overflow-hidden py-1">
+        <div className="relative overflow-hidden">
           <div
             className="pointer-events-none absolute left-0 top-0 z-10 h-full w-10 bg-gradient-to-r from-white to-transparent md:w-14"
             aria-hidden

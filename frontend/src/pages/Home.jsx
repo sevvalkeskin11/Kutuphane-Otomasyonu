@@ -7,6 +7,7 @@ import SmartBookCover from "../components/SmartBookCover";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
+import { HOME_BOOKS_FETCH_LIMIT } from "../config/perfTuning";
 import { fetchLocalBooks } from "../services/dbBooks";
 
 export default function Home() {
@@ -27,7 +28,7 @@ export default function Home() {
   useEffect(() => {
     let cancelled = false;
 
-    fetchLocalBooks()
+    fetchLocalBooks(HOME_BOOKS_FETCH_LIMIT)
       .then((data) => {
         if (cancelled) return;
 
@@ -65,13 +66,22 @@ export default function Home() {
     { label: "Klasik Seçki", value: "150+" },
     { label: "Hızlı Arama", value: "<1sn" },
   ];
-  const topPreviewBooks = buildPreviewBooks(turkishBooks, classics, 8);
-  const bottomPreviewBooks = buildPreviewBooks(classics, turkishBooks, 8);
-  const quickSearches = ["Roman", "Tarih", "Bilim kurgu"];
+  const [topPreviewBooks, bottomPreviewBooks] = splitPreviewBooks(
+    [
+      ...turkishBooks,
+      ...classics,
+      ...weeklyPopular,
+      ...mostLoved,
+      ...recentlyAdded,
+      ...startWithThese,
+    ],
+    18,
+  );
+  const heroStripsReady = topPreviewBooks.length > 0 && bottomPreviewBooks.length > 0;
 
   return (
     <div className="bg-surface">
-      <section className="relative overflow-hidden px-4 pb-28 pt-5 text-white md:px-6 md:pb-32 md:pt-8">
+      <section className="relative overflow-hidden px-4 pb-20 pt-5 text-white md:px-6 md:pb-24 md:pt-7">
         <div
           className="absolute inset-0 bg-cover bg-center bg-no-repeat"
           style={{
@@ -154,7 +164,7 @@ export default function Home() {
                 transition: { duration: reduce ? 0 : 0.52, ease: heroEase },
               },
             }}
-            className="mx-auto mb-10 max-w-2xl text-base text-white/85 md:mb-12 md:text-xl"
+            className="mx-auto mb-6 max-w-2xl text-base text-white/85 md:mb-8 md:text-xl"
           >
             Türkçe seçkiler ve dünya klasikleri tek bir ekranda. Arayın,
             keşfedin, favorilerinizi kaydedin.
@@ -193,19 +203,6 @@ export default function Home() {
               </Button>
             </motion.div>
           </motion.form>
-          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-            {quickSearches.map((item) => (
-              <Button
-                key={item}
-                variant="ghost"
-                size="sm"
-                className="rounded-full bg-white/10 text-white hover:bg-white/20 hover:text-white"
-                onClick={() => navigate(`/katalog?q=${encodeURIComponent(item)}`)}
-              >
-                {item}
-              </Button>
-            ))}
-          </div>
 
           {error && (
             <div className="mx-auto mt-4 w-full max-w-3xl rounded-xl border border-red-200/70 bg-red-50/95 px-4 py-3 text-left text-sm text-red-900 shadow">
@@ -214,6 +211,7 @@ export default function Home() {
             </div>
           )}
 
+          {heroStripsReady && (
           <motion.div
             variants={{
               hidden: reduce ? { opacity: 1 } : { opacity: 0, y: 18 },
@@ -223,7 +221,7 @@ export default function Home() {
                 transition: { duration: reduce ? 0 : 0.6, ease: heroEase },
               },
             }}
-            className="relative mx-auto mt-8 w-full max-w-6xl overflow-hidden px-0 py-0 md:mt-10 md:py-1"
+            className="relative mx-auto mt-5 w-full max-w-6xl -translate-y-2 overflow-hidden px-0 py-0 md:mt-7 md:-translate-y-3 md:py-1"
           >
             <div className="space-y-1.5">
               <div className="relative overflow-hidden">
@@ -298,11 +296,12 @@ export default function Home() {
               </div>
             </div>
           </motion.div>
+          )}
         </motion.div>
       </section>
 
-      <div className="mx-auto -mt-16 max-w-6xl px-4 md:-mt-20 md:px-6">
-        <Card className="rounded-2xl border border-white/70 bg-white/90 p-5 backdrop-blur md:p-7">
+      <div className="mx-auto -mt-12 max-w-6xl px-4 md:-mt-14 md:px-6">
+        <Card className="rounded-2xl border border-white/70 bg-white/90 p-4 backdrop-blur md:p-5">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {quickStats.map((item) => (
               <div
@@ -321,8 +320,8 @@ export default function Home() {
         </Card>
       </div>
 
-      <div className="mx-auto max-w-6xl px-4 py-10 md:px-6 md:py-14">
-        <HorizontalBookRow
+      <div className="mx-auto max-w-6xl px-4 pb-2 pt-6 md:px-6 md:pb-3 md:pt-8">
+        <BookRow
           title="Haftanın Popüler Kitapları"
           subtitle="Bu hafta okuyucularin en cok ilgi gosterdigi secimler."
           books={weeklyPopular}
@@ -331,7 +330,7 @@ export default function Home() {
           variant="scroll"
           actionTo="/katalog?q=bestseller%20fiction"
         />
-        <HorizontalBookRow
+        <BookRow
           title="Bu Kitaplarla Başla"
           subtitle="Yeni bir okuma rutini icin ideal baslangic listesi."
           books={startWithThese}
@@ -340,7 +339,7 @@ export default function Home() {
           variant="scroll"
           actionTo="/katalog?q=modern%20classics%20fiction"
         />
-        <HorizontalBookRow
+        <BookRow
           title="En Sevilen Kitaplar"
           subtitle="Uzun sure trendde kalan ve tekrar tekrar onerilen eserler."
           books={mostLoved}
@@ -349,7 +348,7 @@ export default function Home() {
           variant="scroll"
           actionTo="/katalog?q=most%20loved%20novels%20fiction"
         />
-        <HorizontalBookRow
+        <BookRow
           title="Son Eklenen Kitaplar"
           subtitle="Kataloga yeni eklenen guncel kitaplari kacirma."
           books={recentlyAdded}
@@ -358,41 +357,73 @@ export default function Home() {
           variant="scroll"
           actionTo="/katalog?q=subject%3Afiction"
         />
-        <HorizontalBookRow
+        <BookRow
           title="Öne çıkan Türkçe kitaplar"
           subtitle="Veritabanımızdan derlenen yerli edebiyat ve roman seçkileri."
           books={turkishBooks}
           loading={loading}
           error={error}
+          actionTo="/katalog?q=t%C3%BCrk%20edebiyat%C4%B1"
         />
-        <HorizontalBookRow
+        <BookRow
           title="Dünya klasikleri"
           subtitle="Evrensel edebiyattan seçilmiş klasik eserler — keşfetmek için kaydırın."
           books={classics}
           loading={loading}
           error={error}
           reverse
+          actionTo="/katalog?q=classics"
         />
       </div>
     </div>
   );
 }
 
-function buildPreviewBooks(primaryBooks = [], secondaryBooks = [], target = 8) {
-  const pick = (b) => Boolean(b.thumbnail && b.volumeInfo?.title);
-  const primary = primaryBooks.filter(pick);
-  const secondary = secondaryBooks.filter(pick);
-  const pool = [...primary, ...secondary];
+function BookRow({ loading, error, books, ...props }) {
+  if (!loading && !error && (!books || books.length === 0)) return null;
+  return (
+    <HorizontalBookRow
+      {...props}
+      books={books}
+      loading={loading}
+      error={error}
+    />
+  );
+}
 
+function splitPreviewBooks(allBooks = [], target = 18) {
+  const pick = (b) => Boolean(b?.thumbnail && b?.volumeInfo?.title);
+
+  const seen = new Set();
+  const unique = [];
+  for (const book of allBooks) {
+    if (!pick(book)) continue;
+    const key = book.isbn || book.id;
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(book);
+  }
+
+  if (!unique.length) return [[], []];
+
+  const mid = Math.ceil(unique.length / 2);
+  const firstHalf = unique.slice(0, mid);
+  const secondHalf = unique.slice(mid).length ? unique.slice(mid) : firstHalf;
+
+  return [
+    fillPreviewStrip(firstHalf, target, "top"),
+    fillPreviewStrip(secondHalf, target, "bottom"),
+  ];
+}
+
+function fillPreviewStrip(pool, target, prefix) {
   if (!pool.length) return [];
-
   const result = [];
   let i = 0;
   while (result.length < target) {
     const book = pool[i % pool.length];
-    result.push({ ...book, id: `${book.id}-preview-${i}` });
+    result.push({ ...book, id: `${book.id}-${prefix}-${i}` });
     i += 1;
   }
-
   return result;
 }

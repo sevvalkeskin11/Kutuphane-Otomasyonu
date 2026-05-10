@@ -1,19 +1,28 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { apiUrl } from "../services/dbBooks";
+import { useAuth } from "../context/AuthContext";
 
 export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [hataMesaji, setHataMesaji] = useState(""); // Hataları ekranda göstermek için
   const navigate = useNavigate(); // Giriş başarılıysa yönlendirmek için
+  const location = useLocation();
+  const { login } = useAuth();
+  // PrivateRoute korumalı bir sayfadan buraya gönderildiyse oraya geri döneriz.
+  const from = location.state?.from;
+  const redirectTo =
+    from && typeof from.pathname === "string"
+      ? `${from.pathname}${from.search || ""}`
+      : "/";
 
   async function onSubmit(e) {
     e.preventDefault();
     setHataMesaji(""); // Yeni denemede eski hatayı temizle
 
     try {
-      // 1. Backend'e isteği at
-      const response = await fetch("http://localhost:5050/api/auth/login", {
+      const response = await fetch(apiUrl("/api/auth/login"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ email, password }),
@@ -21,17 +30,15 @@ export default function Login() {
 
       const data = await response.json();
 
-      // 2. Eğer backend hata dönerse (örn: yanlış şifre)
       if (!response.ok) {
         throw new Error(data.error || "Giriş yapılamadı.");
       }
 
-      // 3. Başarılıysa! Token'ı ve kullanıcıyı tarayıcıya kaydet
-      localStorage.setItem("token", data.token);
-      localStorage.setItem("user", JSON.stringify(data.user));
+      // Token ve kullanıcı bilgisi tek elden context üzerinden kaydedilir;
+      // context hem localStorage'a yazar hem global state'i günceller.
+      login(data.user, data.token);
 
-      // 4. Anasayfaya yönlendir
-      navigate("/"); 
+      navigate(redirectTo, { replace: true });
 
     } catch (err) {
       setHataMesaji(err.message); // Hatayı ekrana basmak için state'e kaydet
