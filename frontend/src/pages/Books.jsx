@@ -32,12 +32,13 @@ function normalizeCatalogQuery(q) {
   return q;
 }
 
-// 1. Arama motorunu kendi veritabanı sütunlarımıza uyarladık
+// 1. Arama motorunu kendi veritabanı sütunlarımıza uyarladık (AÇIKLAMA EKLENDİ)
 function catalogBookMatches(book, q, cat, author) {
   const title = (book.kitap_adi || "").toLowerCase();
   const authors = (book.yazar || "").toLowerCase();
   const cats = (book.kategoriler || "").toLowerCase();
-  const hay = `${title} ${authors} ${cats}`;
+  const desc = (book.aciklama || book.ozet || "").toLowerCase(); // YENİ: Özetleri de alıyoruz
+  const hay = `${title} ${authors} ${cats} ${desc}`; // YENİ: desc aramaya dahil edildi
 
   if (q.trim()) {
     const words = q.toLowerCase().split(/\s+/).filter(Boolean);
@@ -186,21 +187,30 @@ export default function Books() {
       .filter((s) => s.books.length > 0);
   }, [serverCategories, allBooks]);
 
-  // 4. Kategori seçenekleri:
-  //    1) Backend /api/kategoriler dönerse onu kullan (tek kaynak).
-  //    2) Henüz dönmediyse / boşsa, yüklenen kitap satırlarından türet.
+// 4. Kategori seçenekleri: Slash (/) ve virgül (,) temizliği yapıldı!
   const categoryOptions = useMemo(() => {
-    if (serverCategories.length > 0) return serverCategories;
     const set = new Set();
-    allBooks.forEach((book) => {
-      const cat = book.kategoriler;
-      if (!cat) return;
-      String(cat)
-        .split(",")
+
+    const kategorileriTemizleVeEkle = (catString) => {
+      if (!catString) return;
+      String(catString)
+        .split(/[,/]/) // Hem virgül hem slash'ten böler
         .map((part) => part.trim())
         .filter(Boolean)
-        .forEach((part) => set.add(part));
-    });
+        .forEach((part) => {
+          const formatli = part.charAt(0).toUpperCase() + part.slice(1).toLowerCase();
+          set.add(formatli);
+        });
+    };
+
+    if (serverCategories.length > 0) {
+      serverCategories.forEach(kategorileriTemizleVeEkle);
+    } else {
+      allBooks.forEach((book) => {
+        kategorileriTemizleVeEkle(book.kategoriler);
+      });
+    }
+
     return [...set].sort((a, b) => a.localeCompare(b, "tr"));
   }, [serverCategories, allBooks]);
 

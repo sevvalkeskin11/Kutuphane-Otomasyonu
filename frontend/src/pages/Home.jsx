@@ -8,7 +8,7 @@ import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Input from "../components/ui/Input";
 import { HOME_BOOKS_FETCH_LIMIT } from "../config/perfTuning";
-import { fetchLocalBooks } from "../services/dbBooks";
+import { fetchLocalBooks, fetchPopularBooks } from "../services/dbBooks";
 
 export default function Home() {
   const navigate = useNavigate();
@@ -25,14 +25,22 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+useEffect(() => {
     let cancelled = false;
 
+    // 1. Önce gerçek popüler kitapları çek
+    fetchPopularBooks()
+      .then((popularData) => {
+        if (!cancelled) setWeeklyPopular(popularData);
+      })
+      .catch((err) => console.error("Popüler kitaplar çekilemedi:", err));
+
+    // 2. Sonra diğer raflar için genel kitapları çek
     fetchLocalBooks(HOME_BOOKS_FETCH_LIMIT)
       .then((data) => {
         if (cancelled) return;
 
-        setWeeklyPopular(data.slice(0, 10));
+        // setWeeklyPopular'ı buradan SİLDİK, çünkü onu yukarıda gerçek veriyle doldurduk!
         setStartWithThese(data.slice(10, 20));
         setMostLoved(data.slice(20, 30));
         setRecentlyAdded(data.slice(30, 40));
@@ -61,10 +69,10 @@ export default function Home() {
   const heroEase = [0.22, 1, 0.36, 1];
   const heroStagger = reduce ? 0 : 0.09;
   const heroDelay = reduce ? 0 : 0.12;
-  const quickStats = [
-    { label: "Türkçe Öneri", value: "60.000+" },
-    { label: "Klasik Seçki", value: "150+" },
-    { label: "Hızlı Arama", value: "<1sn" },
+const quickStats = [
+    { label: "Kayıtlı Eser", value: "150+" },
+    { label: "Stok Senkronizasyonu", value: "Anlık" },
+    { label: "Sorgu Hızı", value: "<1sn" },
   ];
   const [topPreviewBooks, bottomPreviewBooks] = splitPreviewBooks(
     [
