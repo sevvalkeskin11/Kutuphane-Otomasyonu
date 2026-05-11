@@ -12,7 +12,6 @@ const { sniffImageMime } = require("./scripts/sniffImageMime");
 const PORT = Number(process.env.PORT) || 5050;
 const DEFAULT_BORROW_DAYS = Number.parseInt(process.env.DEFAULT_BORROW_DAYS || "14", 10) || 14;
 // Paylaşımlı / açık unutulan cihazlarda uzun ömürlü JWT riski: varsayılan 24 saat.
-// İsterseniz .env ile TOKEN_EXPIRES_HOURS=8 gibi daha kısa verin.
 const TOKEN_EXPIRES_HOURS = Number.parseInt(process.env.TOKEN_EXPIRES_HOURS || "24", 10) || 24;
 const AUTH_SECRET = String(process.env.AUTH_SECRET || "").trim() || "dev-only-change-this-secret";
 const ALLOW_GUEST_BORROW = process.env.ALLOW_GUEST_BORROW !== "false";
@@ -242,9 +241,9 @@ function adminRequired(req, res, next) {
 
 // HER ÇAĞRILDIĞINDA GECİKENLERİ BULUP CEZALARI HESAPLAYAN FONKSİYON
 async function syncOverdueLoans() {
-  const gunlukCeza = 5; // Geciken her gün için 5 TL ceza belirledik
+  const gunlukCeza = 5; 
 
-  // Postgres'te iki tarih birbirinden çıkarıldığında aradaki "gün" sayısını verir.
+ 
   await pool.query(
     `
       UPDATE odunc_islemleri
@@ -771,7 +770,6 @@ app.post(
       try {
         await client.query("ROLLBACK");
       } catch {
-        // ignore rollback error
       }
       throw error;
     } finally {
@@ -1059,7 +1057,6 @@ app.post(
       try {
         await client.query("ROLLBACK");
       } catch {
-        // ignore rollback error
       }
       throw error;
     } finally {
@@ -1116,7 +1113,7 @@ app.post(
       if (err.code === "23505") {
         return res.status(409).json({ error: "Bu kitap zaten favorilerinizde." });
       }
-      throw err; // Başka bir hataysa genel hata yakalayıcıya (error handler) gönder
+      throw err; 
     }
   })
 );
@@ -1149,12 +1146,12 @@ app.put(
   "/api/auth/guncelle",
   authRequired,
   asyncHandler(async (req, res) => {
-    const userId = req.auth.sub; // Giriş yapan kullanıcının ID'si
+    const userId = req.auth.sub; 
     
     // Frontend'den gelme ihtimali olan veriler
     const { fullName, phoneNumber, address, newPassword } = req.body;
 
-    // 1. Önce kullanıcının mevcut verilerini veritabanından çek
+    
     const userResult = await pool.query(
       "SELECT * FROM kullanicilar WHERE id = $1",
       [userId]
@@ -1486,6 +1483,55 @@ app.post(
     } finally {
       client.release();
     }
+  })
+);
+// ==========================================
+// EN ÇOK ÖDÜNÇ ALINAN (POPÜLER) KİTAPLAR
+// ==========================================
+app.get(
+  "/api/kitaplar/populer",
+  asyncHandler(async (req, res) => {
+    // odunc_islemleri tablosundaki kayıtlara göre gruplayıp en çok işlem göreni buluruz
+    const result = await pool.query(`
+      SELECT k.*, COUNT(o.id) as islem_sayisi
+      FROM kitaplar k
+      JOIN odunc_islemleri o ON k.isbn = o.kitap_isbn
+      GROUP BY k.isbn
+      ORDER BY islem_sayisi DESC
+      LIMIT 10
+    `);
+    
+    // Eğer henüz hiç kitap ödünç alınmamışsa, rastgele 10 kitap dönsün ki anasayfa boş kalmasın
+    if (result.rows.length === 0) {
+      const fallback = await pool.query("SELECT * FROM kitaplar LIMIT 10");
+      return res.json(fallback.rows);
+    }
+
+    res.json(result.rows);
+  })
+);
+
+// ... backend/server.js içine eklemen gereken kod ...
+app.get(
+  "/api/kitaplar/populer",
+  asyncHandler(async (req, res) => {
+    // 1. Önce ödünç alınanlara bak
+    const result = await pool.query(`
+      SELECT k.*, COUNT(o.id) as islem_sayisi
+      FROM kitaplar k
+      JOIN odunc_islemleri o ON k.isbn = o.kitap_isbn
+      GROUP BY k.isbn
+      ORDER BY islem_sayisi DESC
+      LIMIT 10
+    `);
+    
+    // 2. EĞER HİÇ ÖDÜNÇ YOKSA VEYA AZ VARSA, RAF BOŞ KALMASIN DİYE RASTGELE KİTAP DOLDUR (FALLBACK)
+    if (result.rows.length === 0) {
+      const fallback = await pool.query("SELECT * FROM kitaplar LIMIT 10");
+      return res.json(fallback.rows);
+    }
+
+    res.json(result.rows);
   })
 );
 

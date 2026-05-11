@@ -365,3 +365,9 @@ export const getLocalBookById = async (id) => {
   const data = await parseJsonResponse(response);
   return formatBookData(data, 0);
 };
+export const fetchPopularBooks = async () => {
+  const response = await fetch(apiUrl("/api/kitaplar/populer"));
+  const data = await parseJsonResponse(response);
+  if (!Array.isArray(data)) throw new Error("Popüler kitaplar alınamadı");
+  return data.map((b, i) => formatBookData(b, i));
+};
